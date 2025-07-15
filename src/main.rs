@@ -2,7 +2,7 @@ use serde_json;
 use std::env;
 
 // Available if you need it!
-// use serde_bencode
+use serde_bencode;
 
 #[allow(dead_code)]
 fn decode_bencoded_value(encoded_value: &str) -> serde_json::Value {
@@ -30,8 +30,15 @@ fn main() {
 
         // Uncomment this block to pass the first stage
         let encoded_value = &args[2];
-        let decoded_value = decode_bencoded_value(encoded_value);
-        println!("{}", decoded_value.to_string());
+        let decoded_value = match encoded_value.parse::<f64>() {
+            Ok(_value) => serde_bencode::from_str::<f64>(&encoded_value)
+                .unwrap()
+                .to_string(),
+            Err(_) => serde_bencode::from_str::<String>(&encoded_value)
+                .unwrap()
+                .to_string(),
+        };
+        println!("{}", decoded_value);
     } else {
         println!("unknown command: {}", args[1])
     }
