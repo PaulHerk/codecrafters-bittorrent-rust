@@ -30,13 +30,19 @@ fn main() {
 
         // Uncomment this block to pass the first stage
         let encoded_value = &args[2];
-        let decoded_value = match encoded_value.parse::<f64>() {
-            Ok(_value) => serde_bencode::from_str::<f64>(&encoded_value)
+        let decoded_value = match encoded_value.get(..1).unwrap_or(" ") {
+            "i" => serde_bencode::from_str::<f64>(&encoded_value)
                 .unwrap()
                 .to_string(),
-            Err(_) => serde_bencode::from_str::<String>(&encoded_value)
-                .unwrap()
-                .to_string(),
+            _ => {
+                if encoded_value.chars().next().unwrap().is_digit(10) {
+                    serde_bencode::from_str::<String>(&encoded_value)
+                        .unwrap()
+                        .to_string()
+                } else {
+                    panic!("Unhandled encoded value: {}", encoded_value)
+                }
+            }
         };
         println!("{}", decoded_value);
     } else {
