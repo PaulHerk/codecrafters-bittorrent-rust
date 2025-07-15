@@ -38,7 +38,7 @@ fn main() {
             _ => {
                 if encoded_value.chars().next().unwrap().is_digit(10) {
                     let string: String = serde_bencode::from_str(&encoded_value).unwrap();
-                    println!("{}", string);
+                    println!("{:?}", string);
                 } else {
                     panic!("Unhandled encoded value: {}", encoded_value)
                 }
