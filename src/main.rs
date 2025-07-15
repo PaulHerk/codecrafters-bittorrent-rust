@@ -30,21 +30,20 @@ fn main() {
 
         // Uncomment this block to pass the first stage
         let encoded_value = &args[2];
-        let decoded_value = match encoded_value.get(..1).unwrap_or(" ") {
-            "i" => serde_bencode::from_str::<f64>(&encoded_value)
-                .unwrap()
-                .to_string(),
+        match encoded_value.get(..1).unwrap_or(" ") {
+            "i" => {
+                let int: f64 = serde_bencode::from_str(&encoded_value).unwrap();
+                println!("{}", int);
+            }
             _ => {
                 if encoded_value.chars().next().unwrap().is_digit(10) {
-                    serde_bencode::from_str::<String>(&encoded_value)
-                        .unwrap()
-                        .to_string()
+                    let string: String = serde_bencode::from_str(&encoded_value).unwrap();
+                    println!("{}", string);
                 } else {
                     panic!("Unhandled encoded value: {}", encoded_value)
                 }
             }
         };
-        println!("{}", decoded_value);
     } else {
         println!("unknown command: {}", args[1])
     }
