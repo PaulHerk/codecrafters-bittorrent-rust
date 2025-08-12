@@ -1,22 +1,27 @@
 use serde_json;
-use std::env;
+use std::{any::Any, env};
 
 // Available if you need it!
 use serde_bencode;
 
 #[allow(dead_code)]
 fn decode_bencoded_value(encoded_value: &str) -> serde_json::Value {
-    // If encoded_value starts with a digit, it's a number
-    if encoded_value.chars().next().unwrap().is_digit(10) {
-        // Example: "5:hello" -> "hello"
-        let colon_index = encoded_value.find(':').unwrap();
-        let number_string = &encoded_value[..colon_index];
-        let number = number_string.parse::<usize>().unwrap();
-        let string = &encoded_value[colon_index + 1..colon_index + 1 + number];
-        return serde_json::Value::String(string.to_string());
-    } else {
-        panic!("Unhandled encoded value: {}", encoded_value)
+    // Example: "i5e" -> 5
+    if let Some(number) = encoded_value
+        .strip_prefix('i')
+        .and_then(|rest| rest.split_once('e'))
+        .and_then(|(digits, _)| digits.parse::<i64>().ok())
+    {
+        return number.into();
     }
+    // Example: "0:hello" -> "hello"
+    else if let Some((len, rest)) = encoded_value.split_once(':').and_then(|(len, rest)| {
+        let len = len.parse::<usize>().ok()?;
+        Some((len, rest))
+    }) {
+        return rest[..len].to_string().into();
+    }
+    panic!("Unhandled encoded value: {}", encoded_value)
 }
 
 // Usage: your_program.sh decode "<encoded_value>"
@@ -30,20 +35,8 @@ fn main() {
 
         // Uncomment this block to pass the first stage
         let encoded_value = &args[2];
-        match encoded_value.get(..1).unwrap_or(" ") {
-            "i" => {
-                let int: f64 = serde_bencode::from_str(&encoded_value).unwrap();
-                println!("{}", int);
-            }
-            _ => {
-                if encoded_value.chars().next().unwrap().is_digit(10) {
-                    let string: String = serde_bencode::from_str(&encoded_value).unwrap();
-                    println!("{:?}", string);
-                } else {
-                    panic!("Unhandled encoded value: {}", encoded_value)
-                }
-            }
-        };
+        let decoded_value = decode_bencoded_value(encoded_value);
+        println!("{decoded_value}");
     } else {
         println!("unknown command: {}", args[1])
     }
