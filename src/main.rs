@@ -5,23 +5,42 @@ use std::{any::Any, env};
 use serde_bencode;
 
 #[allow(dead_code)]
-fn decode_bencoded_value(encoded_value: &str) -> serde_json::Value {
-    // Example: "i5e" -> 5
-    if let Some(number) = encoded_value
-        .strip_prefix('i')
-        .and_then(|rest| rest.split_once('e'))
-        .and_then(|(digits, _)| digits.parse::<i64>().ok())
-    {
-        return number.into();
+fn decode_bencoded_value(encoded_value: &str) -> (serde_json::Value, &str) {
+    match encoded_value.split_at(1) {
+        ("i", rest) => {
+            // Example: "i5e" -> 5
+            if let Some(number) = rest
+                .split_once('e')
+                .and_then(|(digits, _)| digits.parse::<i64>().ok())
+            {
+                let num_len_in_ascii = number.to_string().len() + 1; // +1 for the 'e'
+                (number.into(), &rest[num_len_in_ascii..])
+            } else {
+                panic!()
+            }
+        }
+        ("l", mut rest) => {
+            // Example: l7:bencodei-20ee -> ["bencode", -20]
+            let mut values = Vec::new();
+            while !rest.is_empty() && !rest.starts_with('e') {
+                let (value, remainder) = decode_bencoded_value(rest);
+                values.push(value);
+                rest = remainder;
+            }
+            (values.into(), &rest[1..])
+        }
+        _ => {
+            // Example: "0:hello" -> "hello"
+            if let Some((len, rest)) = encoded_value.split_once(':').and_then(|(len, rest)| {
+                let len = len.parse::<usize>().ok()?;
+                Some((len, rest))
+            }) {
+                (rest[..len].to_string().into(), &rest[len..])
+            } else {
+                panic!("Invalid bencode")
+            }
+        }
     }
-    // Example: "0:hello" -> "hello"
-    else if let Some((len, rest)) = encoded_value.split_once(':').and_then(|(len, rest)| {
-        let len = len.parse::<usize>().ok()?;
-        Some((len, rest))
-    }) {
-        return rest[..len].to_string().into();
-    }
-    panic!("Unhandled encoded value: {}", encoded_value)
 }
 
 // Usage: your_program.sh decode "<encoded_value>"
@@ -36,7 +55,7 @@ fn main() {
         // Uncomment this block to pass the first stage
         let encoded_value = &args[2];
         let decoded_value = decode_bencoded_value(encoded_value);
-        println!("{decoded_value}");
+        println!("{}", decoded_value.0);
     } else {
         println!("unknown command: {}", args[1])
     }
