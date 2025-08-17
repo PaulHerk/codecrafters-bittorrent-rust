@@ -1,8 +1,7 @@
-use serde_json;
+use serde_json::{self, Map};
 use std::{any::Any, env};
 
 // Available if you need it!
-use serde_bencode;
 
 #[allow(dead_code)]
 fn decode_bencoded_value(encoded_value: &str) -> (serde_json::Value, &str) {
@@ -18,6 +17,20 @@ fn decode_bencoded_value(encoded_value: &str) -> (serde_json::Value, &str) {
             } else {
                 panic!()
             }
+        }
+        ("d", mut rest) => {
+            // Example: d7:meaningi42e4:wiki7:bencodee -> ["meaning": 42, "wiki": "bencode"]
+            let mut dict = Map::new();
+            while !rest.is_empty() && !rest.starts_with('e') {
+                let (key, remainder) = decode_bencoded_value(rest);
+                let Some(key) = key.as_str() else {
+                    panic!("Dict keys must be string, not {key:?}")
+                };
+                let (value, remainder) = decode_bencoded_value(remainder);
+                rest = remainder;
+                dict.insert(key.to_string(), value);
+            }
+            (serde_json::Value::Object(dict), &rest[1..])
         }
         ("l", mut rest) => {
             // Example: l7:bencodei-20ee -> ["bencode", -20]
