@@ -1,75 +1,132 @@
-use serde_json::{self, Map};
-use std::{any::Any, env};
+use anyhow::Context;
+use clap::{Args, Parser, Subcommand};
+use hashes::Hashes;
+use reqwest::Url;
+use serde::Deserialize;
+use serde_bencode;
+use std::{env, path::PathBuf};
 
-// Available if you need it!
+mod hashes {
+    use serde::de::{self, Visitor};
+    use serde::{Deserialize, Deserializer};
+    use std::fmt;
 
-#[allow(dead_code)]
-fn decode_bencoded_value(encoded_value: &str) -> (serde_json::Value, &str) {
-    match encoded_value.split_at(1) {
-        ("i", rest) => {
-            // Example: "i5e" -> 5
-            if let Some(number) = rest
-                .split_once('e')
-                .and_then(|(digits, _)| digits.parse::<i64>().ok())
-            {
-                let num_len_in_ascii = number.to_string().len() + 1; // +1 for the 'e'
-                (number.into(), &rest[num_len_in_ascii..])
-            } else {
-                panic!()
-            }
+    #[derive(Debug, Clone)]
+    pub struct Hashes(pub Vec<[u8; 20]>);
+    struct HashesVisitor;
+
+    impl<'de> Visitor<'de> for HashesVisitor {
+        type Value = Hashes;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("Bytes which length is a multiple of 20")
         }
-        ("d", mut rest) => {
-            // Example: d7:meaningi42e4:wiki7:bencodee -> ["meaning": 42, "wiki": "bencode"]
-            let mut dict = Map::new();
-            while !rest.is_empty() && !rest.starts_with('e') {
-                let (key, remainder) = decode_bencoded_value(rest);
-                let Some(key) = key.as_str() else {
-                    panic!("Dict keys must be string, not {key:?}")
-                };
-                let (value, remainder) = decode_bencoded_value(remainder);
-                rest = remainder;
-                dict.insert(key.to_string(), value);
+
+        fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            if v.len() % 20 != 0 {
+                return Err(de::Error::custom(format!(
+                    "Bytes which length is a multiple of 20. Got {:?}",
+                    v.len()
+                )));
             }
-            (serde_json::Value::Object(dict), &rest[1..])
+            Ok(Hashes(
+                v.chunks_exact(20)
+                    .map(|slice_20| slice_20.try_into().expect("slice_20 is 20 bytes"))
+                    .collect(),
+            ))
         }
-        ("l", mut rest) => {
-            // Example: l7:bencodei-20ee -> ["bencode", -20]
-            let mut values = Vec::new();
-            while !rest.is_empty() && !rest.starts_with('e') {
-                let (value, remainder) = decode_bencoded_value(rest);
-                values.push(value);
-                rest = remainder;
-            }
-            (values.into(), &rest[1..])
-        }
-        _ => {
-            // Example: "0:hello" -> "hello"
-            if let Some((len, rest)) = encoded_value.split_once(':').and_then(|(len, rest)| {
-                let len = len.parse::<usize>().ok()?;
-                Some((len, rest))
-            }) {
-                (rest[..len].to_string().into(), &rest[len..])
-            } else {
-                panic!("Invalid bencode")
-            }
+    }
+
+    impl<'de> Deserialize<'de> for Hashes {
+        fn deserialize<D>(deserializer: D) -> Result<Hashes, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            deserializer.deserialize_bytes(HashesVisitor)
         }
     }
 }
+#[derive(Debug, Clone, Deserialize)]
+/// The Metainfo files
+struct Torrent {
+    /// The url of the tracker.
+    announce: String,
+    /// This maps to a dictionary.
+    info: Info,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct Info {
+    /// The name key maps to a UTF-8 encoded string.
+    /// In the single file case, the name key is the name of a file, in the muliple file case,
+    /// it's the name of a directory.
+    name: String,
+    /// `piece length` maps to the number of bytes in each piece the file is split into.
+    #[serde(rename = "piece length")]
+    piece_length: usize,
+    /// pieces is to be subdivided into strings of length 20,
+    /// each of which is the SHA1 hash of the piece at the corresponding index.
+    pieces: Hashes,
+    /// If length is present then the download represents a single file,
+    /// otherwise it represents a set of files which go in a directory structure.
+    #[serde(flatten)]
+    files: Key,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum Key {
+    /// In the single file case, length maps to the length of the file in bytes.
+    SingleFile { length: usize },
+    /// For the purposes of the other keys, the multi-file case is treated as only having
+    /// a single file by concatenating the files in the order they appear in the files list.
+    MultiFile { files: Vec<File> },
+}
+#[derive(Debug, Clone, Deserialize)]
+struct File {
+    /// The length of the file, in bytes.
+    length: usize,
+    /// A list of UTF-8 encoded strings corresponding to subdirectory names,
+    /// the last of which is the actual file name (a zero length list is an error case).
+    path: Vec<String>,
+}
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: DecodeMetadataType,
+}
+#[derive(Debug, Subcommand)]
+enum DecodeMetadataType {
+    Decode { value: String },
+    Info { torrent: PathBuf },
+}
 
 // Usage: your_program.sh decode "<encoded_value>"
-fn main() {
-    let args: Vec<String> = env::args().collect();
-    let command = &args[1];
+fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
 
-    if command == "decode" {
-        // You can use print statements as follows for debugging, they'll be visible when running tests.
-        eprintln!("Logs from your program will appear here!");
+    // You can check for the existence of subcommands, and if found use their
+    // matches just as you would the top level cmd
+    match &cli.command {
+        DecodeMetadataType::Decode { value } => {
+            let decoded_value: serde_bencode::value::Value =
+                serde_bencode::from_str(value).expect("Unable to decode bencode");
+            println!("{:?}", decoded_value);
+        }
 
-        // Uncomment this block to pass the first stage
-        let encoded_value = &args[2];
-        let decoded_value = decode_bencoded_value(encoded_value);
-        println!("{}", decoded_value.0);
-    } else {
-        println!("unknown command: {}", args[1])
+        DecodeMetadataType::Info { torrent } => {
+            let bytes = std::fs::read(torrent).context("read torrent file")?;
+            let decoded_value = serde_bencode::from_bytes::<Torrent>(&bytes).unwrap();
+            println!("Tracker URL: {}", decoded_value.announce);
+            if let Key::SingleFile { length } = decoded_value.info.files {
+                println!("Length: {}", length);
+            }
+        }
     }
+    Ok(())
 }
