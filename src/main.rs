@@ -1,15 +1,14 @@
 use anyhow::Context;
-use clap::{Args, Parser, Subcommand};
+use clap::{Parser, Subcommand};
 use hashes::Hashes;
-use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use serde_bencode;
 use sha1::{Digest, Sha1};
-use std::{env, path::PathBuf};
+use std::path::PathBuf;
 
 mod hashes {
     use serde::de::{self, Visitor};
-    use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
+    use serde::ser::{Serialize, Serializer};
     use serde::{Deserialize, Deserializer};
     use std::fmt;
 
