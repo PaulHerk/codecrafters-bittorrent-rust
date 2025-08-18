@@ -145,6 +145,11 @@ fn main() -> anyhow::Result<()> {
             hasher.update(info_bytes);
             let info_hash = hasher.finalize();
             println!("Info Hash: {}", hex::encode(info_hash));
+            println!("Piece Length: {}", decoded_value.info.piece_length);
+            println!("Piece Hashes:",);
+            for hash in decoded_value.info.pieces.0 {
+                println!("{}", hex::encode(hash));
+            }
         }
     }
     Ok(())
