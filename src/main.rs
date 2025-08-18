@@ -2,18 +2,30 @@ use anyhow::Context;
 use clap::{Args, Parser, Subcommand};
 use hashes::Hashes;
 use reqwest::Url;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_bencode;
+use sha1::{Digest, Sha1};
 use std::{env, path::PathBuf};
 
 mod hashes {
     use serde::de::{self, Visitor};
+    use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
     use serde::{Deserialize, Deserializer};
     use std::fmt;
 
     #[derive(Debug, Clone)]
     pub struct Hashes(pub Vec<[u8; 20]>);
     struct HashesVisitor;
+
+    impl Serialize for Hashes {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let single_slice = self.0.concat();
+            serializer.serialize_bytes(&single_slice)
+        }
+    }
 
     impl<'de> Visitor<'de> for HashesVisitor {
         type Value = Hashes;
@@ -49,7 +61,7 @@ mod hashes {
         }
     }
 }
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 /// The Metainfo files
 struct Torrent {
     /// The url of the tracker.
@@ -58,7 +70,7 @@ struct Torrent {
     info: Info,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct Info {
     /// The name key maps to a UTF-8 encoded string.
     /// In the single file case, the name key is the name of a file, in the muliple file case,
@@ -76,7 +88,7 @@ struct Info {
     files: Key,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 enum Key {
     /// In the single file case, length maps to the length of the file in bytes.
@@ -85,7 +97,7 @@ enum Key {
     /// a single file by concatenating the files in the order they appear in the files list.
     MultiFile { files: Vec<File> },
 }
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct File {
     /// The length of the file, in bytes.
     length: usize,
@@ -115,17 +127,24 @@ fn main() -> anyhow::Result<()> {
     match &cli.command {
         DecodeMetadataType::Decode { value } => {
             let decoded_value: serde_bencode::value::Value =
-                serde_bencode::from_str(value).expect("Unable to decode bencode");
+                serde_bencode::from_str(value).context("decode bencode")?;
             println!("{:?}", decoded_value);
         }
 
         DecodeMetadataType::Info { torrent } => {
             let bytes = std::fs::read(torrent).context("read torrent file")?;
-            let decoded_value = serde_bencode::from_bytes::<Torrent>(&bytes).unwrap();
+            let decoded_value =
+                serde_bencode::from_bytes::<Torrent>(&bytes).context("decode torrent")?;
             println!("Tracker URL: {}", decoded_value.announce);
             if let Key::SingleFile { length } = decoded_value.info.files {
                 println!("Length: {}", length);
             }
+            let info_bytes =
+                serde_bencode::to_bytes(&decoded_value.info).context("re-encode info")?;
+            let mut hasher = Sha1::new();
+            hasher.update(info_bytes);
+            let info_hash = hasher.finalize();
+            println!("Info Hash: {}", hex::encode(info_hash));
         }
     }
     Ok(())
