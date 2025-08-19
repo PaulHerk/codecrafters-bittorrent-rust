@@ -1,9 +1,14 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
+use codecrafters_bittorrent::peer::Connection;
 use codecrafters_bittorrent::torrent::{Key, Torrent};
 use codecrafters_bittorrent::tracker::{serialize_info_hash, TrackerRequest, TrackerResponse};
+use reqwest::Url;
 use serde_bencode;
+use std::net::SocketAddrV4;
 use std::path::PathBuf;
+
+const PEER_ID: &[u8; 20] = b"00112233445566778899";
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -13,9 +18,19 @@ struct Cli {
 }
 #[derive(Debug, Subcommand)]
 enum DecodeMetadataType {
-    Decode { value: String },
-    Info { torrent: PathBuf },
-    Peers { torrent: PathBuf },
+    Decode {
+        value: String,
+    },
+    Info {
+        torrent: PathBuf,
+    },
+    Peers {
+        torrent: PathBuf,
+    },
+    Handshake {
+        torrent: PathBuf,
+        addr: SocketAddrV4,
+    },
 }
 
 // Usage: your_program.sh decode "<encoded_value>"
@@ -52,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
             let Key::SingleFile { length } = torrent.info.files else {
                 todo!();
             };
-            let request = TrackerRequest::new("00112233445566778899".to_string(), 6881, length);
+            let request = TrackerRequest::new(PEER_ID, 6881, length);
 
             let request_parsed = &serde_urlencoded::to_string(request).context("encode request")?;
             let url = format!(
@@ -73,6 +88,14 @@ async fn main() -> anyhow::Result<()> {
             for peer in response.peers.0 {
                 println!("{}", peer);
             }
+        }
+        DecodeMetadataType::Handshake { torrent, addr } => {
+            let bytes = std::fs::read(torrent).context("read torrent file")?;
+            let torrent = serde_bencode::from_bytes::<Torrent>(&bytes).context("decode torrent")?;
+            let connection = Connection::new(&torrent.info_hash()?, &PEER_ID, *addr)
+                .await
+                .context("connect to peer")?;
+            println!("Peer Id: {}", hex::encode(connection.peer_id_other));
         }
     }
     Ok(())

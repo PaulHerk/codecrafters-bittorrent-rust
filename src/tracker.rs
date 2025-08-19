@@ -16,7 +16,7 @@ pub struct TrackerRequest {
     // #[serde(serialize_with = "serialize_info_hash")]
     // pub info_hash: [u8; 20],
     /// a unique identifier for your client
-    pub peer_id: String,
+    pub peer_id: [u8; 20],
     /// the port your client is listening on
     pub port: u16,
     /// the total amount uploaded so far
@@ -31,15 +31,9 @@ pub struct TrackerRequest {
 }
 
 impl TrackerRequest {
-    pub fn new(peer_id: String, port: u16, file_length: usize) -> Self {
-        if peer_id.len() > 20 {
-            panic!(
-                "peer_id must be less than 20 bytes, got {peer_id} with len {}",
-                peer_id.len()
-            );
-        }
+    pub fn new(peer_id: &[u8; 20], port: u16, file_length: usize) -> Self {
         Self {
-            peer_id,
+            peer_id: *peer_id,
             port,
             uploaded: 0,
             downloaded: 0,
