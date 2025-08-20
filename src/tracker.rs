@@ -2,38 +2,37 @@ use serde::{Deserialize, Serialize};
 
 use crate::tracker::peers::Peers;
 
-pub fn serialize_info_hash(info_hash: &[u8; 20]) -> String {
-    info_hash
+pub fn escape_bytes(bytes: &[u8; 20]) -> String {
+    bytes
         .iter()
         .map(|b| format!("%{}", hex::encode([*b])))
         .collect()
 }
 
-/// NOTE THAT THE INFO_HASH IS NOT INCLUDED IN THE REQUEST
+/// NOTE THAT THE INFO_HASH AND PEER_ID IS NOT INCLUDED IN THE REQUEST
 #[derive(Debug, Clone, Serialize)]
 pub struct TrackerRequest {
     /// the info hash of the torrent
     // #[serde(serialize_with = "serialize_info_hash")]
     // pub info_hash: [u8; 20],
     /// a unique identifier for your client
-    pub peer_id: [u8; 20],
+    // pub peer_id: [u8; 20],
     /// the port your client is listening on
     pub port: u16,
     /// the total amount uploaded so far
-    pub uploaded: usize,
+    pub uploaded: u32,
     /// the total amount downloaded so far
-    pub downloaded: usize,
+    pub downloaded: u32,
     /// the number of bytes left to download
-    pub left: usize,
+    pub left: u32,
     /// whether the peer list should use the compact representation
     /// The compact representation is more commonly used in the wild, the non-compact representation is mostly supported for backward-compatibility.
     pub compact: u8,
 }
 
 impl TrackerRequest {
-    pub fn new(peer_id: &[u8; 20], port: u16, file_length: usize) -> Self {
+    pub fn new(port: u16, file_length: u32) -> Self {
         Self {
-            peer_id: *peer_id,
             port,
             uploaded: 0,
             downloaded: 0,

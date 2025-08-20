@@ -1,18 +1,24 @@
+use futures_util::{SinkExt, StreamExt};
 use std::net::SocketAddrV4;
+use tokio_util::codec::Framed;
 
 use anyhow::Context;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+use crate::messages::{
+    Message, MessageFramer, MessageType, RequestPieceMsgPayload, ResponsePieceMsgPayload,
+};
 
 pub struct Connection {
     pub info_hash_self: [u8; 20],
     pub peer_id_self: [u8; 20],
     pub info_hash_other: [u8; 20],
     pub peer_id_other: [u8; 20],
-    pub tcp: tokio::net::TcpStream,
+    pub framed_read_write: Framed<tokio::net::TcpStream, MessageFramer>,
 }
 
 impl Connection {
-    pub async fn new(
+    pub async fn connect(
         info_hash_self: &[u8; 20],
         peer_id_self: &[u8; 20],
         addr: SocketAddrV4,
@@ -25,15 +31,70 @@ impl Connection {
             .context("write handshake")?;
         let (info_hash_other, peer_id_other) =
             read_handshake(&mut tcp).await.context("read handshake")?;
+        let framed = Framed::new(tcp, MessageFramer);
         Ok(Self {
             info_hash_self: *info_hash_self,
             peer_id_self: *peer_id_self,
             info_hash_other,
             peer_id_other,
-            tcp,
+            framed_read_write: framed,
         })
     }
+
+    pub async fn init_data_exchange(&mut self) -> anyhow::Result<()> {
+        let bitfield = self
+            .framed_read_write
+            .next()
+            .await
+            .expect("peer should send bitfield")
+            .context("peer msg was invalid")?;
+        assert_eq!(bitfield.message_id, MessageType::Bitfield);
+        // NOTE: we assume that all the peers have all the data
+
+        let interested_msg = Message::new(MessageType::Interested, vec![]);
+        self.framed_read_write
+            .send(interested_msg)
+            .await
+            .context("write interested frame")?;
+
+        let unchoke = self
+            .framed_read_write
+            .next()
+            .await
+            .expect("peer should send bitfield")
+            .context("peer msg was invalid")?;
+        assert_eq!(unchoke.message_id, MessageType::Unchoke);
+        assert!(unchoke.payload.is_empty());
+
+        Ok(())
+    }
+
+    pub async fn get_block(
+        &mut self,
+        request_payload: RequestPieceMsgPayload,
+    ) -> anyhow::Result<ResponsePieceMsgPayload> {
+        let message = Message::new(MessageType::Request, request_payload.to_be_bytes());
+        self.framed_read_write
+            .send(message)
+            .await
+            .context("write request frame")?;
+        let piece_msg = self
+            .framed_read_write
+            .next()
+            .await
+            .expect("peer should send piece")
+            .context("peer msg was invalid")?;
+        assert_eq!(piece_msg.message_id, MessageType::Piece);
+        assert!(piece_msg.payload.len() > 0);
+
+        let response =
+            ResponsePieceMsgPayload::from_be_bytes(&piece_msg.payload, request_payload.length);
+        assert_eq!(response.index, request_payload.index);
+        assert_eq!(response.begin, request_payload.begin);
+        Ok(response)
+    }
 }
+
 async fn write_handshake(
     info_hash: &[u8; 20],
     peer_id: &[u8; 20],

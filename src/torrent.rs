@@ -84,7 +84,7 @@ pub struct Info {
     pub name: String,
     /// `piece length` maps to the number of bytes in each piece the file is split into.
     #[serde(rename = "piece length")]
-    pub piece_length: usize,
+    pub piece_length: u32,
     /// pieces is to be subdivided into strings of length 20,
     /// each of which is the SHA1 hash of the piece at the corresponding index.
     pub pieces: Hashes,
@@ -98,7 +98,7 @@ pub struct Info {
 #[serde(untagged)]
 pub enum Key {
     /// In the single file case, length maps to the length of the file in bytes.
-    SingleFile { length: usize },
+    SingleFile { length: u32 },
     /// For the purposes of the other keys, the multi-file case is treated as only having
     /// a single file by concatenating the files in the order they appear in the files list.
     MultiFile { files: Vec<File> },
@@ -106,7 +106,7 @@ pub enum Key {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct File {
     /// The length of the file, in bytes.
-    pub length: usize,
+    pub length: u32,
     /// A list of UTF-8 encoded strings corresponding to subdirectory names,
     /// the last of which is the actual file name (a zero length list is an error case).
     pub path: Vec<String>,

@@ -1,10 +1,13 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
+use codecrafters_bittorrent::messages::RequestPieceMsgPayload;
 use codecrafters_bittorrent::peer::Connection;
 use codecrafters_bittorrent::torrent::{Key, Torrent};
-use codecrafters_bittorrent::tracker::{serialize_info_hash, TrackerRequest, TrackerResponse};
-use reqwest::Url;
+use codecrafters_bittorrent::tracker::{escape_bytes, TrackerRequest, TrackerResponse};
+use codecrafters_bittorrent::BLOCK_MAX;
 use serde_bencode;
+use sha1::{Digest, Sha1};
+use std::io::Write;
 use std::net::SocketAddrV4;
 use std::path::PathBuf;
 
@@ -17,6 +20,7 @@ struct Cli {
     command: DecodeMetadataType,
 }
 #[derive(Debug, Subcommand)]
+#[clap(rename_all = "snake_case")]
 enum DecodeMetadataType {
     Decode {
         value: String,
@@ -30,6 +34,12 @@ enum DecodeMetadataType {
     Handshake {
         torrent: PathBuf,
         addr: SocketAddrV4,
+    },
+    DownloadPiece {
+        #[arg(short)]
+        output: PathBuf,
+        torrent: PathBuf,
+        piece: u32,
     },
 }
 
@@ -47,8 +57,7 @@ async fn main() -> anyhow::Result<()> {
             println!("{:?}", decoded_value);
         }
         DecodeMetadataType::Info { torrent } => {
-            let bytes = std::fs::read(torrent).context("read torrent file")?;
-            let torrent = serde_bencode::from_bytes::<Torrent>(&bytes).context("decode torrent")?;
+            let torrent = read_torrent(&torrent)?;
             println!("Tracker URL: {}", torrent.announce);
             if let Key::SingleFile { length } = torrent.info.files {
                 println!("Length: {}", length);
@@ -62,41 +71,122 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         DecodeMetadataType::Peers { torrent } => {
-            let bytes = std::fs::read(torrent).context("read torrent file")?;
-            let torrent = serde_bencode::from_bytes::<Torrent>(&bytes).context("decode torrent")?;
-            let Key::SingleFile { length } = torrent.info.files else {
-                todo!();
-            };
-            let request = TrackerRequest::new(PEER_ID, 6881, length);
-
-            let request_parsed = &serde_urlencoded::to_string(request).context("encode request")?;
-            let url = format!(
-                "{}?info_hash={}&{}",
-                torrent.announce,
-                &serialize_info_hash(&torrent.info_hash()?),
-                request_parsed,
-            );
-            // !TODO: parse url type-safe, rn this is a workaround because the serializer parses '%' to "%25"
-            let response = reqwest::get(url).await.context("send request")?;
-            let response_bytes = response
-                .bytes()
-                .await
-                .context("get tracker response bytes")?;
-
-            let response = serde_bencode::from_bytes::<TrackerResponse>(&response_bytes)
-                .context("deserialize tracker response")?;
+            let torrent = read_torrent(torrent)?;
+            let length = get_length(&torrent);
+            let response = get_response(&torrent, length).await?;
             for peer in response.peers.0 {
                 println!("{}", peer);
             }
         }
         DecodeMetadataType::Handshake { torrent, addr } => {
-            let bytes = std::fs::read(torrent).context("read torrent file")?;
-            let torrent = serde_bencode::from_bytes::<Torrent>(&bytes).context("decode torrent")?;
-            let connection = Connection::new(&torrent.info_hash()?, &PEER_ID, *addr)
+            let torrent = read_torrent(torrent)?;
+            let connection = Connection::connect(&torrent.info_hash()?, &PEER_ID, *addr)
                 .await
                 .context("connect to peer")?;
             println!("Peer Id: {}", hex::encode(connection.peer_id_other));
         }
+        DecodeMetadataType::DownloadPiece {
+            output,
+            torrent,
+            piece: piece_i,
+        } => {
+            let torrent = read_torrent(torrent)?;
+            assert!(*piece_i < torrent.info.pieces.0.len() as u32); // piece starts at 0
+            let length = get_length(&torrent);
+            let response = get_response(&torrent, length).await?;
+            let mut connection = Connection::connect(
+                &torrent.info_hash()?,
+                &PEER_ID,
+                *response.peers.0.get(0).unwrap(),
+            )
+            .await
+            .context("connect to peer")?;
+            println!("Peer Id: {}", hex::encode(connection.peer_id_other));
+
+            connection.init_data_exchange().await.context("init")?;
+            let piece_hash = torrent
+                .info
+                .pieces
+                .0
+                .get(*piece_i as usize)
+                .context("piece not found")?;
+            let piece_size = if *piece_i == torrent.info.pieces.0.len() as u32 - 1
+                && length % torrent.info.piece_length != 0
+            {
+                length % torrent.info.piece_length
+            } else {
+                torrent.info.piece_length
+            };
+            // the "+ BLOCK_MAX - 1" rounds up
+            let nblocks = (piece_size + BLOCK_MAX - 1) / BLOCK_MAX;
+            eprintln!("{nblocks} blocks of at most {BLOCK_MAX} to reach {piece_size}");
+
+            let mut all_blocks = vec![0_u8; piece_size as usize];
+            for block in 0..nblocks {
+                let block_length = if block == nblocks - 1 && piece_size % BLOCK_MAX != 0 {
+                    piece_size % BLOCK_MAX
+                } else {
+                    BLOCK_MAX
+                };
+                let request_payload =
+                    RequestPieceMsgPayload::new(*piece_i, block * BLOCK_MAX, block_length);
+                let response = connection
+                    .get_block(request_payload)
+                    .await
+                    .context(format!("download piece {}", block))?;
+                assert_eq!(response.index, *piece_i);
+
+                all_blocks[response.begin as usize..response.block.len() + response.begin as usize]
+                    .copy_from_slice(&response.block[..block_length as usize]);
+            }
+
+            let mut sha1 = Sha1::new();
+            sha1.update(&all_blocks);
+            let hash: [u8; 20] = sha1
+                .finalize()
+                .try_into()
+                .expect("GenericArray<_, 20> == [u8; 20]");
+            assert_eq!(piece_hash, &hash);
+
+            let mut file = std::fs::File::create(output).context("create downloaded file")?;
+            file.write_all(&all_blocks)
+                .context("write downloaded file")?;
+        }
     }
     Ok(())
+}
+
+fn read_torrent(torrent: &PathBuf) -> anyhow::Result<Torrent> {
+    let bytes = std::fs::read(torrent).context("read torrent file")?;
+    let torrent = serde_bencode::from_bytes::<Torrent>(&bytes).context("decode torrent")?;
+    Ok(torrent)
+}
+
+fn get_length(torrent: &Torrent) -> u32 {
+    let Key::SingleFile { length } = torrent.info.files else {
+        todo!();
+    };
+    length
+}
+
+async fn get_response(torrent: &Torrent, length: u32) -> anyhow::Result<TrackerResponse> {
+    let request = TrackerRequest::new(6881, length);
+
+    let request_parsed = &serde_urlencoded::to_string(request).context("encode request")?;
+    let url = format!(
+        "{}?info_hash={}&peer_id={}&{}",
+        torrent.announce,
+        &escape_bytes(&torrent.info_hash()?),
+        &escape_bytes(PEER_ID),
+        request_parsed,
+    );
+    // !TODO: parse url type-safe, rn this is a workaround because the serializer parses '%' to "%25"
+    let response = reqwest::get(url).await.context("send request")?;
+    let response_bytes = response
+        .bytes()
+        .await
+        .context("get tracker response bytes")?;
+
+    serde_bencode::from_bytes::<TrackerResponse>(&response_bytes)
+        .context("deserialize tracker response")
 }
