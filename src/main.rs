@@ -41,6 +41,11 @@ enum DecodeMetadataType {
         torrent: PathBuf,
         piece: u32,
     },
+    Download {
+        #[arg(short)]
+        output: Option<PathBuf>,
+        torrent: PathBuf,
+    },
 }
 
 // Usage: your_program.sh decode "<encoded_value>"
@@ -92,65 +97,25 @@ async fn main() -> anyhow::Result<()> {
         } => {
             let torrent = read_torrent(torrent)?;
             assert!(*piece_i < torrent.info.pieces.0.len() as u32); // piece starts at 0
-            let length = get_length(&torrent);
-            let response = get_response(&torrent, length).await?;
-            let mut connection = Connection::connect(
-                &torrent.info_hash()?,
-                &PEER_ID,
-                *response.peers.0.get(0).unwrap(),
-            )
-            .await
-            .context("connect to peer")?;
-            println!("Peer Id: {}", hex::encode(connection.peer_id_other));
-
-            connection.init_data_exchange().await.context("init")?;
-            let piece_hash = torrent
-                .info
-                .pieces
-                .0
-                .get(*piece_i as usize)
-                .context("piece not found")?;
-            let piece_size = if *piece_i == torrent.info.pieces.0.len() as u32 - 1
-                && length % torrent.info.piece_length != 0
-            {
-                length % torrent.info.piece_length
-            } else {
-                torrent.info.piece_length
-            };
-            // the "+ BLOCK_MAX - 1" rounds up
-            let nblocks = (piece_size + BLOCK_MAX - 1) / BLOCK_MAX;
-            eprintln!("{nblocks} blocks of at most {BLOCK_MAX} to reach {piece_size}");
-
-            let mut all_blocks = vec![0_u8; piece_size as usize];
-            for block in 0..nblocks {
-                let block_length = if block == nblocks - 1 && piece_size % BLOCK_MAX != 0 {
-                    piece_size % BLOCK_MAX
-                } else {
-                    BLOCK_MAX
-                };
-                let request_payload =
-                    RequestPieceMsgPayload::new(*piece_i, block * BLOCK_MAX, block_length);
-                let response = connection
-                    .get_block(request_payload)
-                    .await
-                    .context(format!("download piece {}", block))?;
-                assert_eq!(response.index, *piece_i);
-
-                all_blocks[response.begin as usize..response.block.len() + response.begin as usize]
-                    .copy_from_slice(&response.block[..block_length as usize]);
-            }
-
-            let mut sha1 = Sha1::new();
-            sha1.update(&all_blocks);
-            let hash: [u8; 20] = sha1
-                .finalize()
-                .try_into()
-                .expect("GenericArray<_, 20> == [u8; 20]");
-            assert_eq!(piece_hash, &hash);
+            let all_blocks = download_piece(&torrent, *piece_i).await?;
 
             let mut file = std::fs::File::create(output).context("create downloaded file")?;
             file.write_all(&all_blocks)
                 .context("write downloaded file")?;
+        }
+        DecodeMetadataType::Download { output, torrent } => {
+            let torrent = read_torrent(torrent)?;
+            let output = match output {
+                Some(output) => output,
+                None => &PathBuf::from(&torrent.info.name),
+            };
+            let mut file = std::fs::File::create(output).context("create downloaded file")?;
+            println!("Downloading {} pieces", torrent.info.pieces.0.len());
+            for piece_i in 0..torrent.info.pieces.0.len() as u32 {
+                let all_blocks = download_piece(&torrent, piece_i).await?;
+                file.write_all(&all_blocks)
+                    .context("write downloaded file")?;
+            }
         }
     }
     Ok(())
@@ -189,4 +154,63 @@ async fn get_response(torrent: &Torrent, length: u32) -> anyhow::Result<TrackerR
 
     serde_bencode::from_bytes::<TrackerResponse>(&response_bytes)
         .context("deserialize tracker response")
+}
+
+async fn download_piece(torrent: &Torrent, piece_i: u32) -> anyhow::Result<Vec<u8>> {
+    let length = get_length(&torrent);
+    let response = get_response(&torrent, length).await?;
+    let mut connection = Connection::connect(
+        &torrent.info_hash()?,
+        &PEER_ID,
+        *response.peers.0.get(0).unwrap(),
+    )
+    .await
+    .context("connect to peer")?;
+    println!("Peer Id: {}", hex::encode(connection.peer_id_other));
+
+    connection.init_data_exchange().await.context("init")?;
+    let piece_hash = torrent
+        .info
+        .pieces
+        .0
+        .get(piece_i as usize)
+        .context("piece not found")?;
+    let piece_size = if piece_i == torrent.info.pieces.0.len() as u32 - 1
+        && length % torrent.info.piece_length != 0
+    {
+        length % torrent.info.piece_length
+    } else {
+        torrent.info.piece_length
+    };
+    // the "+ BLOCK_MAX - 1" rounds up
+    let nblocks = (piece_size + BLOCK_MAX - 1) / BLOCK_MAX;
+    eprintln!("{nblocks} blocks of at most {BLOCK_MAX} to reach {piece_size}");
+
+    let mut all_blocks = vec![0_u8; piece_size as usize];
+    for block in 0..nblocks {
+        let block_length = if block == nblocks - 1 && piece_size % BLOCK_MAX != 0 {
+            piece_size % BLOCK_MAX
+        } else {
+            BLOCK_MAX
+        };
+        let request_payload = RequestPieceMsgPayload::new(piece_i, block * BLOCK_MAX, block_length);
+        let response = connection
+            .get_block(request_payload)
+            .await
+            .context(format!("download piece {}", block))?;
+        assert_eq!(response.index, piece_i);
+
+        all_blocks[response.begin as usize..block_length as usize + response.begin as usize]
+            .copy_from_slice(&response.block[..block_length as usize]);
+    }
+
+    let mut sha1 = Sha1::new();
+    sha1.update(&all_blocks);
+    let hash: [u8; 20] = sha1
+        .finalize()
+        .try_into()
+        .expect("GenericArray<_, 20> == [u8; 20]");
+    assert_eq!(piece_hash, &hash);
+
+    Ok(all_blocks)
 }

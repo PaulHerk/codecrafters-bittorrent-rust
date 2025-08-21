@@ -183,7 +183,7 @@ pub struct ResponsePieceMsgPayload {
 impl ResponsePieceMsgPayload {
     pub fn from_be_bytes(bytes: &[u8], block_length: u32) -> Self {
         let mut block = [0u8; BLOCK_MAX as usize];
-        block.copy_from_slice(&bytes[8..8 + block_length as usize]);
+        block[..block_length as usize].copy_from_slice(&bytes[8..8 + block_length as usize]);
         Self {
             index: u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
             begin: u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]),
