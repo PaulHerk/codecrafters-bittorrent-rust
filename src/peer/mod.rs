@@ -7,9 +7,9 @@ use anyhow::Context;
 
 use crate::messages::payloads::*;
 use crate::messages::*;
-use crate::peer::handshake::Handshake;
 
 pub mod handshake;
+mod states;
 
 pub struct Connection(Framed<TcpStream, MessageFramer>);
 
@@ -27,6 +27,7 @@ impl Connection {
             .await
             .expect("peer should send bitfield")
             .context("peer msg was invalid")?;
+        let bitfield_idk = BitfieldPayload::from_be_bytes(&bitfield.payload);
         assert_eq!(bitfield.message_id, MessageType::Bitfield);
         // NOTE: we assume that all the peers have all the data
 
@@ -49,8 +50,8 @@ impl Connection {
 
     pub async fn get_block(
         &mut self,
-        request_payload: RequestPieceMsgPayload,
-    ) -> anyhow::Result<ResponsePieceMsgPayload> {
+        request_payload: RequestPiecePayload,
+    ) -> anyhow::Result<ResponsePiecePayload> {
         let message = Message::new(MessageType::Request, request_payload.to_be_bytes());
         self.0.send(message).await.context("write request frame")?;
         let piece_msg = self
@@ -63,7 +64,7 @@ impl Connection {
         assert!(piece_msg.payload.len() > 0);
 
         let response =
-            ResponsePieceMsgPayload::from_be_bytes(&piece_msg.payload, request_payload.length);
+            ResponsePiecePayload::from_be_bytes(&piece_msg.payload, request_payload.length);
         assert_eq!(response.index, request_payload.index);
         assert_eq!(response.begin, request_payload.begin);
         Ok(response)

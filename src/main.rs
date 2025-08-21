@@ -194,7 +194,7 @@ async fn download_piece(torrent: &Torrent, piece_i: u32) -> anyhow::Result<Vec<u
         } else {
             BLOCK_MAX
         };
-        let request_payload = RequestPieceMsgPayload::new(piece_i, block * BLOCK_MAX, block_length);
+        let request_payload = RequestPiecePayload::new(piece_i, block * BLOCK_MAX, block_length);
         let response = connection
             .get_block(request_payload)
             .await
