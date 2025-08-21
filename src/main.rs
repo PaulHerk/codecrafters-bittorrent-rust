@@ -1,10 +1,6 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use codecrafters_bittorrent::messages::RequestPieceMsgPayload;
-use codecrafters_bittorrent::peer::Connection;
-use codecrafters_bittorrent::torrent::{Key, Torrent};
-use codecrafters_bittorrent::tracker::{escape_bytes, TrackerRequest, TrackerResponse};
-use codecrafters_bittorrent::BLOCK_MAX;
+use codecrafters_bittorrent::*;
 use serde_bencode;
 use sha1::{Digest, Sha1};
 use std::io::Write;
@@ -85,10 +81,15 @@ async fn main() -> anyhow::Result<()> {
         }
         DecodeMetadataType::Handshake { torrent, addr } => {
             let torrent = read_torrent(torrent)?;
-            let connection = Connection::connect(&torrent.info_hash()?, &PEER_ID, *addr)
+            let mut tcp_stream = Connection::connect(*addr)
                 .await
                 .context("connect to peer")?;
-            println!("Peer Id: {}", hex::encode(connection.peer_id_other));
+            let handshake_send = Handshake::new(torrent.info_hash()?, *PEER_ID);
+            let handshake_recv = handshake_send
+                .init_handshake(&mut tcp_stream)
+                .await
+                .context("init handshake")?;
+            println!("Peer Id: {}", hex::encode(handshake_recv.peer_id));
         }
         DecodeMetadataType::DownloadPiece {
             output,
@@ -139,10 +140,10 @@ async fn get_response(torrent: &Torrent, length: u32) -> anyhow::Result<TrackerR
 
     let request_parsed = &serde_urlencoded::to_string(request).context("encode request")?;
     let url = format!(
-        "{}?info_hash={}&peer_id={}&{}",
+        "{}?info_hash={}&peer_id={}&{}&compact=1",
         torrent.announce,
-        &escape_bytes(&torrent.info_hash()?),
-        &escape_bytes(PEER_ID),
+        &escape_bytes_url(&torrent.info_hash()?),
+        &escape_bytes_url(PEER_ID),
         request_parsed,
     );
     // !TODO: parse url type-safe, rn this is a workaround because the serializer parses '%' to "%25"
@@ -159,16 +160,16 @@ async fn get_response(torrent: &Torrent, length: u32) -> anyhow::Result<TrackerR
 async fn download_piece(torrent: &Torrent, piece_i: u32) -> anyhow::Result<Vec<u8>> {
     let length = get_length(&torrent);
     let response = get_response(&torrent, length).await?;
-    let mut connection = Connection::connect(
-        &torrent.info_hash()?,
-        &PEER_ID,
-        *response.peers.0.get(0).unwrap(),
-    )
-    .await
-    .context("connect to peer")?;
-    println!("Peer Id: {}", hex::encode(connection.peer_id_other));
+    let handshake_send = Handshake::new(torrent.info_hash()?, *PEER_ID);
+    let mut tcp_stream = Connection::connect(*response.peers.0.get(0).unwrap())
+        .await
+        .context("connect to peer")?;
+    let handshake_recv = handshake_send.init_handshake(&mut tcp_stream).await?;
+    println!("Peer Id: {}", hex::encode(handshake_recv.peer_id));
 
-    connection.init_data_exchange().await.context("init")?;
+    let mut connection = Connection::init_data_exchange(tcp_stream)
+        .await
+        .context("init")?;
     let piece_hash = torrent
         .info
         .pieces

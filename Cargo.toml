@@ -6,6 +6,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.68"                                                  # error handling
+bincode = "2.0.1"
 bytes = "1.3.0"                                                    # helps wrap responses from reqwest
 clap = { version = "4.0.32", features = ["derive"]}                # creating a cli
 futures-core = "0.3.31"

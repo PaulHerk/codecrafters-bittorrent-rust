@@ -2,14 +2,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::tracker::peers::Peers;
 
-pub fn escape_bytes(bytes: &[u8; 20]) -> String {
-    bytes
-        .iter()
-        .map(|b| format!("%{}", hex::encode([*b])))
-        .collect()
-}
-
 /// NOTE THAT THE INFO_HASH AND PEER_ID IS NOT INCLUDED IN THE REQUEST
+// this is because I cannot seem to get serde to serialize the info_hash and peer_id in url_encoded form
+// serde_urlencoded cannot serialize an array of bytes
 #[derive(Debug, Clone, Serialize)]
 pub struct TrackerRequest {
     /// the info hash of the torrent
