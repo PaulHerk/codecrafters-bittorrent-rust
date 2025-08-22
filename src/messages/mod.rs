@@ -1,42 +1,81 @@
+use std::marker::PhantomData;
+use std::ops::Deref;
+
 use bytes::BufMut;
 use bytes::{Buf, BytesMut};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use tokio_util::codec::Decoder;
 use tokio_util::codec::Encoder;
+
+use crate::{BitfieldPayload, NoPayload, Payload, RequestPiecePayload, ResponsePiecePayload};
 pub mod payloads;
 
-#[derive(Debug, Clone, Copy, Serialize_repr, Deserialize_repr, PartialEq)]
-#[repr(u8)]
-pub enum MessageType {
-    Choke = 0,
-    Unchoke = 1,
-    Interested = 2,
-    NotInterested = 3,
-    Have = 4,
-    Bitfield = 5,
-    Request = 6,
-    Piece = 7,
-    Cancel = 8,
+#[derive(Debug, Clone)]
+pub enum MessageAll {
+    Choke(P<NoPayload>),
+    Unchoke(P<NoPayload>),
+    Interested(P<NoPayload>),
+    NotInterested(P<NoPayload>),
+    /// TODO: The 'have' message's payload is a single number, the index which that downloader just completed and checked the hash of.
+    Have(P<NoPayload>),
+    Bitfield(P<BitfieldPayload>),
+    Request(P<RequestPiecePayload>),
+    Piece(P<ResponsePiecePayload>),
+    Cancel(P<RequestPiecePayload>),
+    KeepAlive(P<NoPayload>),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Message {
-    pub message_length_prefix: u32,
-    #[serde(flatten)]
-    pub message_id: MessageType,
-    pub payload: Vec<u8>,
-}
-
-impl Message {
-    pub fn new(message_id: MessageType, payload: Vec<u8>) -> Self {
-        Self {
-            message_length_prefix: payload.len() as u32 + 5,
-            message_id,
-            payload,
+impl MessageAll {
+    pub fn to_be_bytes(&self) -> Vec<u8> {
+        match self {
+            MessageAll::Choke(payload) => payload.0.to_be_bytes(),
+            MessageAll::Unchoke(payload) => payload.0.to_be_bytes(),
+            MessageAll::Interested(payload) => payload.0.to_be_bytes(),
+            MessageAll::NotInterested(payload) => payload.0.to_be_bytes(),
+            MessageAll::Have(payload) => payload.0.to_be_bytes(),
+            MessageAll::Bitfield(payload) => payload.clone().0.to_be_bytes(),
+            MessageAll::Request(payload) => payload.0.to_be_bytes(),
+            MessageAll::Piece(payload) => payload.0.to_be_bytes(),
+            MessageAll::Cancel(payload) => payload.0.to_be_bytes(),
+            MessageAll::KeepAlive(payload) => payload.0.to_be_bytes(),
         }
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct Message {
+    /// the length_prefix of the message which includes the message type + payload length
+    pub length: u32,
+    pub payload: MessageAll,
+}
+
+impl Message {
+    pub fn new(payload: MessageAll) -> Self {
+        Self {
+            length: payload.to_be_bytes().len() as u32 + 4, // I don't like that it gets converted to bytes first which gets discarded and when sent, its turned to bytes again
+            payload,
+        }
+    }
+    pub fn get_msg_type(&self) -> u8 {
+        match self.payload {
+            MessageAll::Choke(_) => 0,
+            MessageAll::Unchoke(_) => 1,
+            MessageAll::Interested(_) => 2,
+            MessageAll::NotInterested(_) => 3,
+            MessageAll::Have(_) => 4,
+            MessageAll::Bitfield(_) => 5,
+            MessageAll::Request(_) => 6,
+            MessageAll::Piece(_) => 7,
+            MessageAll::Cancel(_) => 8,
+            MessageAll::KeepAlive(_) => unreachable!(),
+        }
+    }
+}
+
+/// A wrapper for payloads that implements `Payload` for `MessageAll`.
+#[derive(Debug, Clone)]
+pub struct P<T: Payload>(pub T);
 
 pub struct MessageFramer;
 
@@ -61,7 +100,10 @@ impl Decoder for MessageFramer {
             // this is a keep alive message
             // discard it
             src.advance(4);
-            return self.decode(src);
+            return Ok(Some(Message {
+                length: 0,
+                payload: MessageAll::KeepAlive(P(NoPayload)),
+            }));
         }
 
         if src.len() < 5 {
@@ -90,26 +132,41 @@ impl Decoder for MessageFramer {
             return Ok(None);
         }
 
-        // Use advance to modify src such that it no longer contains
-        // this frame.
-        let Ok(msg_type): Result<MessageType, _> = serde_json::from_str(&src[4].to_string()) else {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Invalid message type: {:?}", src[4]),
-            ));
-        };
         let data = if length > 1 {
             src[5..4 + length as usize].to_vec()
         } else {
             vec![]
         };
+        let data = data.as_slice();
+        let msg_type = src[4];
         src.advance(4 + length as usize);
 
-        // Convert the data to a string, or fail if it is not valid utf-8.
+        let payload = match msg_type {
+            0 => Ok(MessageAll::Choke(P(NoPayload))),
+            1 => Ok(MessageAll::Unchoke(P(NoPayload))),
+            2 => Ok(MessageAll::Interested(P(NoPayload))),
+            3 => Ok(MessageAll::NotInterested(P(NoPayload))),
+            4 => Ok(MessageAll::Have(P(NoPayload))),
+            5 => Ok(MessageAll::Bitfield(P(BitfieldPayload::from_be_bytes(
+                data,
+            )))),
+            6 => Ok(MessageAll::Request(P(RequestPiecePayload::from_be_bytes(
+                data,
+            )))),
+            7 => Ok(MessageAll::Piece(P(ResponsePiecePayload::from_be_bytes(
+                data,
+            )))),
+            8 => Ok(MessageAll::Cancel(P(RequestPiecePayload::from_be_bytes(
+                data,
+            )))),
+            _ => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Invalid message type: {:?}", src[4]),
+            )),
+        };
         Ok(Some(Message {
-            message_length_prefix: length, // this is safe because it was cast from u32 to usize
-            message_id: msg_type,
-            payload: data,
+            length,
+            payload: payload?,
         }))
     }
 }
@@ -120,23 +177,20 @@ impl Encoder<Message> for MessageFramer {
     fn encode(&mut self, item: Message, dst: &mut BytesMut) -> Result<(), Self::Error> {
         // Don't send a Message if it is longer than the other end will
         // accept.
-        if item.message_length_prefix > MAX {
+        if item.length > MAX {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!(
-                    "Frame of length {} is too large.",
-                    item.message_length_prefix
-                ),
+                format!("Frame of length {} is too large.", item.length),
             ));
         }
 
         // Reserve space in the buffer.
-        dst.reserve(item.message_length_prefix as usize);
+        dst.reserve(item.length as usize);
 
         // Write the length and string to the buffer.
-        dst.extend_from_slice(&item.message_length_prefix.to_be_bytes());
-        dst.put_u8(item.message_id as u8);
-        dst.extend_from_slice(item.payload.as_slice());
+        dst.extend_from_slice(&item.length.to_be_bytes());
+        dst.put_u8(item.get_msg_type());
+        dst.extend_from_slice(item.payload.to_be_bytes().as_slice());
         Ok(())
     }
 }
