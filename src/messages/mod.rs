@@ -1,10 +1,5 @@
-use std::marker::PhantomData;
-use std::ops::Deref;
-
 use bytes::BufMut;
 use bytes::{Buf, BytesMut};
-use serde::{Deserialize, Serialize};
-use serde_repr::{Deserialize_repr, Serialize_repr};
 use tokio_util::codec::Decoder;
 use tokio_util::codec::Encoder;
 
@@ -13,32 +8,32 @@ pub mod payloads;
 
 #[derive(Debug, Clone)]
 pub enum MessageAll {
-    Choke(P<NoPayload>),
-    Unchoke(P<NoPayload>),
-    Interested(P<NoPayload>),
-    NotInterested(P<NoPayload>),
+    Choke(NoPayload),
+    Unchoke(NoPayload),
+    Interested(NoPayload),
+    NotInterested(NoPayload),
     /// TODO: The 'have' message's payload is a single number, the index which that downloader just completed and checked the hash of.
-    Have(P<NoPayload>),
-    Bitfield(P<BitfieldPayload>),
-    Request(P<RequestPiecePayload>),
-    Piece(P<ResponsePiecePayload>),
-    Cancel(P<RequestPiecePayload>),
-    KeepAlive(P<NoPayload>),
+    Have(NoPayload),
+    Bitfield(BitfieldPayload),
+    Request(RequestPiecePayload),
+    Piece(ResponsePiecePayload),
+    Cancel(RequestPiecePayload),
+    KeepAlive(NoPayload),
 }
 
 impl MessageAll {
     pub fn to_be_bytes(&self) -> Vec<u8> {
         match self {
-            MessageAll::Choke(payload) => payload.0.to_be_bytes(),
-            MessageAll::Unchoke(payload) => payload.0.to_be_bytes(),
-            MessageAll::Interested(payload) => payload.0.to_be_bytes(),
-            MessageAll::NotInterested(payload) => payload.0.to_be_bytes(),
-            MessageAll::Have(payload) => payload.0.to_be_bytes(),
-            MessageAll::Bitfield(payload) => payload.clone().0.to_be_bytes(),
-            MessageAll::Request(payload) => payload.0.to_be_bytes(),
-            MessageAll::Piece(payload) => payload.0.to_be_bytes(),
-            MessageAll::Cancel(payload) => payload.0.to_be_bytes(),
-            MessageAll::KeepAlive(payload) => payload.0.to_be_bytes(),
+            MessageAll::Choke(payload) => payload.to_be_bytes(),
+            MessageAll::Unchoke(payload) => payload.to_be_bytes(),
+            MessageAll::Interested(payload) => payload.to_be_bytes(),
+            MessageAll::NotInterested(payload) => payload.to_be_bytes(),
+            MessageAll::Have(payload) => payload.to_be_bytes(),
+            MessageAll::Bitfield(payload) => payload.clone().to_be_bytes(),
+            MessageAll::Request(payload) => payload.to_be_bytes(),
+            MessageAll::Piece(payload) => payload.to_be_bytes(),
+            MessageAll::Cancel(payload) => payload.to_be_bytes(),
+            MessageAll::KeepAlive(payload) => payload.to_be_bytes(),
         }
     }
 }
@@ -73,10 +68,6 @@ impl Message {
     }
 }
 
-/// A wrapper for payloads that implements `Payload` for `MessageAll`.
-#[derive(Debug, Clone)]
-pub struct P<T: Payload>(pub T);
-
 pub struct MessageFramer;
 
 const MAX: u32 = 8 * 1024 * 1024;
@@ -102,7 +93,7 @@ impl Decoder for MessageFramer {
             src.advance(4);
             return Ok(Some(Message {
                 length: 0,
-                payload: MessageAll::KeepAlive(P(NoPayload)),
+                payload: MessageAll::KeepAlive(NoPayload),
             }));
         }
 
@@ -142,23 +133,17 @@ impl Decoder for MessageFramer {
         src.advance(4 + length as usize);
 
         let payload = match msg_type {
-            0 => Ok(MessageAll::Choke(P(NoPayload))),
-            1 => Ok(MessageAll::Unchoke(P(NoPayload))),
-            2 => Ok(MessageAll::Interested(P(NoPayload))),
-            3 => Ok(MessageAll::NotInterested(P(NoPayload))),
-            4 => Ok(MessageAll::Have(P(NoPayload))),
-            5 => Ok(MessageAll::Bitfield(P(BitfieldPayload::from_be_bytes(
+            0 => Ok(MessageAll::Choke(NoPayload)),
+            1 => Ok(MessageAll::Unchoke(NoPayload)),
+            2 => Ok(MessageAll::Interested(NoPayload)),
+            3 => Ok(MessageAll::NotInterested(NoPayload)),
+            4 => Ok(MessageAll::Have(NoPayload)),
+            5 => Ok(MessageAll::Bitfield(BitfieldPayload::from_be_bytes(data))),
+            6 => Ok(MessageAll::Request(RequestPiecePayload::from_be_bytes(
                 data,
-            )))),
-            6 => Ok(MessageAll::Request(P(RequestPiecePayload::from_be_bytes(
-                data,
-            )))),
-            7 => Ok(MessageAll::Piece(P(ResponsePiecePayload::from_be_bytes(
-                data,
-            )))),
-            8 => Ok(MessageAll::Cancel(P(RequestPiecePayload::from_be_bytes(
-                data,
-            )))),
+            ))),
+            7 => Ok(MessageAll::Piece(ResponsePiecePayload::from_be_bytes(data))),
+            8 => Ok(MessageAll::Cancel(RequestPiecePayload::from_be_bytes(data))),
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("Invalid message type: {:?}", src[4]),

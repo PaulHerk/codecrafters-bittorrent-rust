@@ -1,32 +1,26 @@
-use std::net::SocketAddrV4;
-
-struct Peer {
-    pub info_hash: [u8; 20],
-    pub peer_id: [u8; 20],
-    pub addr: SocketAddrV4,
-    pub state: PeerState,
-    pub choked_us: bool,
-}
-
-enum PeerState {
+#[derive(Debug, Clone, Copy)]
+pub enum PeerState {
     Initial(InitialState),
     Core(CoreState),
     DataTransfer,
 }
-impl PeerState {
-    pub fn new() -> Self {
-        Self::Initial(InitialState::NotConnected)
+impl Default for PeerState {
+    fn default() -> Self {
+        PeerState::Initial(InitialState::default())
     }
 }
 
-enum InitialState {
+#[derive(Debug, Clone, Copy, Default)]
+pub enum InitialState {
+    #[default]
     NotConnected,
     Connected,
     Handshake,
 }
 
+#[derive(Debug, Clone, Copy)]
 /// Choked means that we choked the peer
-enum CoreState {
+pub enum CoreState {
     ChokedNotInterested,
     ChokedInterested,
     UnchokedInterested,

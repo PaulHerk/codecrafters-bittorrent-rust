@@ -1,17 +1,12 @@
+use std::net::SocketAddrV4;
+
 use serde::{Deserialize, Serialize};
-
-use crate::tracker::peers::PeerConnections;
-
-/// NOTE THAT THE INFO_HASH AND PEER_ID IS NOT INCLUDED IN THE REQUEST
-// this is because I cannot seem to get serde to serialize the info_hash and peer_id in url_encoded form
-// serde_urlencoded cannot serialize an array of bytes
 #[derive(Debug, Clone, Serialize)]
 pub struct TrackerRequest {
     /// the info hash of the torrent
-    // #[serde(serialize_with = "serialize_info_hash")]
-    // pub info_hash: [u8; 20],
+    pub info_hash: [u8; 20],
     /// a unique identifier for your client
-    // pub peer_id: [u8; 20],
+    pub peer_id: [u8; 20],
     /// the port your client is listening on
     pub port: u16,
     /// the total amount uploaded so far
@@ -26,86 +21,35 @@ pub struct TrackerRequest {
 }
 
 impl TrackerRequest {
-    pub fn new(port: u16, file_length: u32) -> Self {
+    pub fn new(info_hash: [u8; 20], peer_id: [u8; 20], port: u16, file_length: u32) -> Self {
         Self {
+            info_hash,
+            peer_id,
             port,
             uploaded: 0,
             downloaded: 0,
             left: file_length,
-            compact: 1,
+            compact: 0, // TODO
         }
+    }
+    pub fn to_url_encoded(&self) -> String {
+        let mut url_encoded = String::new();
+        url_encoded.push_str(&format!("info_hash={}", escape_bytes_url(&self.info_hash)));
+        url_encoded.push_str(&format!("&peer_id={}", escape_bytes_url(&self.peer_id)));
+        url_encoded.push_str(&format!("&port={}", self.port));
+        url_encoded.push_str(&format!("&uploaded={}", self.uploaded));
+        url_encoded.push_str(&format!("&downloaded={}", self.downloaded));
+        url_encoded.push_str(&format!("&left={}", self.left));
+        url_encoded.push_str(&format!("&compact={}", self.compact));
+        url_encoded
     }
 }
 
-mod peers {
-    use std::{
-        fmt,
-        net::{Ipv4Addr, SocketAddrV4},
-    };
-
-    use serde::{
-        de::{self, Visitor},
-        Deserialize, Deserializer, Serialize, Serializer,
-    };
-    #[derive(Debug, Clone)]
-    pub struct PeerConnections(pub Vec<SocketAddrV4>);
-    struct PeersVisitor;
-
-    impl Serialize for PeerConnections {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
-        {
-            let mut bytes = Vec::with_capacity(self.0.len() * 6);
-            for peer in &self.0 {
-                bytes.extend(&peer.ip().octets());
-                bytes.extend(&peer.port().to_be_bytes());
-            }
-            serializer.serialize_bytes(&bytes)
-        }
-    }
-
-    impl<'de> Visitor<'de> for PeersVisitor {
-        type Value = PeerConnections;
-
-        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-            formatter.write_str("A string of multiples of 6 bytes")
-        }
-        fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
-        where
-            E: de::Error,
-        {
-            if v.len() % 6 != 0 {
-                return Err(de::Error::custom(format!(
-                    "Bytes which length is a multiple of 6. Got {:?}",
-                    v.len()
-                )));
-            }
-            Ok(PeerConnections(
-                v.chunks_exact(6)
-                    .map(|chunk| {
-                        if let &[a, b, c, d, p1, p2] = chunk {
-                            SocketAddrV4::new(
-                                Ipv4Addr::new(a, b, c, d),
-                                u16::from_be_bytes([p1, p2]),
-                            )
-                        } else {
-                            unreachable!();
-                        }
-                    })
-                    .collect(),
-            ))
-        }
-    }
-
-    impl<'de> Deserialize<'de> for PeerConnections {
-        fn deserialize<D>(deserializer: D) -> Result<PeerConnections, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            deserializer.deserialize_bytes(PeersVisitor)
-        }
-    }
+fn escape_bytes_url(bytes: &[u8; 20]) -> String {
+    bytes
+        .iter()
+        .map(|b| format!("%{}", hex::encode([*b])))
+        .collect()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -115,5 +59,26 @@ pub struct TrackerResponse {
     /// A string, which contains list of peers that your client can connect to.
     /// Each peer is represented using 6 bytes.
     /// The first 4 bytes are the peer's IP address and the last 2 bytes are the peer's port number.
-    pub peers: PeerConnections,
+    pub peers: Vec<PeerConnection>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PeerConnection {
+    #[serde(rename = "peer id")]
+    pub peer_id: serde_bytes::ByteArray<20>,
+    #[serde(with = "serde_bytes")]
+    ip: Vec<u8>,
+    port: u16,
+}
+
+impl PeerConnection {
+    pub fn get_socket_addr(&self) -> SocketAddrV4 {
+        if let Ok(ip) = String::from_utf8(self.ip.clone()) {
+            SocketAddrV4::new(ip.parse().unwrap(), self.port)
+        } else {
+            todo!(); // impl Ipv6
+        }
+        // TODO: error handling (IP address or dns name as a string)
+        // TODO: compact form
+    }
 }
