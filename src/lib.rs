@@ -20,6 +20,6 @@ pub const BLOCK_MAX: u32 = 1 << 14;
 pub type MsgFrameType = Framed<tokio::net::TcpStream, MessageFramer>;
 
 pub struct BittorrentClient {
-    pub torrent: Torrent,
+    pub torrents: Vec<Torrent>,
     pub peers: HashMap<MsgFrameType, (Peer, Framed<TcpStream, MessageFramer>)>,
 }

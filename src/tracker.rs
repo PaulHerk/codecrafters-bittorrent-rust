@@ -52,7 +52,7 @@ fn escape_bytes_url(bytes: &[u8; 20]) -> String {
         .collect()
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TrackerResponse {
     /// An integer, indicating how often your client should make a request to the tracker, in seconds.
     pub interval: usize,
@@ -62,7 +62,7 @@ pub struct TrackerResponse {
     pub peers: Vec<PeerConnection>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PeerConnection {
     #[serde(rename = "peer id")]
     pub peer_id: serde_bytes::ByteArray<20>,
@@ -79,6 +79,5 @@ impl PeerConnection {
             todo!(); // impl Ipv6
         }
         // TODO: error handling (IP address or dns name as a string)
-        // TODO: compact form
     }
 }

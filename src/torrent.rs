@@ -74,6 +74,14 @@ impl Torrent {
         let info_hash = hasher.finalize();
         info_hash.try_into().context("convert to [u8; 20]")
     }
+
+    pub fn get_length(&self) -> u32 {
+        if let Key::SingleFile { length } = self.info.files {
+            length
+        } else {
+            todo!()
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

@@ -1,9 +1,12 @@
 use bytes::BufMut;
 use bytes::{Buf, BytesMut};
+use serde_repr::Deserialize_repr;
 use tokio_util::codec::Decoder;
 use tokio_util::codec::Encoder;
 
-use crate::{BitfieldPayload, NoPayload, Payload, RequestPiecePayload, ResponsePiecePayload};
+use crate::{
+    BitfieldPayload, HavePayload, NoPayload, Payload, RequestPiecePayload, ResponsePiecePayload,
+};
 pub mod payloads;
 
 #[derive(Debug, Clone)]
@@ -13,7 +16,7 @@ pub enum MessageAll {
     Interested(NoPayload),
     NotInterested(NoPayload),
     /// TODO: The 'have' message's payload is a single number, the index which that downloader just completed and checked the hash of.
-    Have(NoPayload),
+    Have(HavePayload),
     Bitfield(BitfieldPayload),
     Request(RequestPiecePayload),
     Piece(ResponsePiecePayload),
@@ -29,13 +32,27 @@ impl MessageAll {
             MessageAll::Interested(payload) => payload.to_be_bytes(),
             MessageAll::NotInterested(payload) => payload.to_be_bytes(),
             MessageAll::Have(payload) => payload.to_be_bytes(),
-            MessageAll::Bitfield(payload) => payload.clone().to_be_bytes(),
+            MessageAll::Bitfield(payload) => payload.to_be_bytes(),
             MessageAll::Request(payload) => payload.to_be_bytes(),
             MessageAll::Piece(payload) => payload.to_be_bytes(),
             MessageAll::Cancel(payload) => payload.to_be_bytes(),
             MessageAll::KeepAlive(payload) => payload.to_be_bytes(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize_repr)]
+#[repr(u8)]
+pub enum MessageType {
+    Choke = 0,
+    Unchoke = 1,
+    Interested = 2,
+    NotInterested = 3,
+    Have = 4,
+    Bitfield = 5,
+    Request = 6,
+    Piece = 7,
+    Cancel = 8,
 }
 
 #[derive(Debug, Clone)]
@@ -52,17 +69,17 @@ impl Message {
             payload,
         }
     }
-    pub fn get_msg_type(&self) -> u8 {
+    pub fn get_msg_type(&self) -> MessageType {
         match self.payload {
-            MessageAll::Choke(_) => 0,
-            MessageAll::Unchoke(_) => 1,
-            MessageAll::Interested(_) => 2,
-            MessageAll::NotInterested(_) => 3,
-            MessageAll::Have(_) => 4,
-            MessageAll::Bitfield(_) => 5,
-            MessageAll::Request(_) => 6,
-            MessageAll::Piece(_) => 7,
-            MessageAll::Cancel(_) => 8,
+            MessageAll::Choke(_) => MessageType::Choke,
+            MessageAll::Unchoke(_) => MessageType::Unchoke,
+            MessageAll::Interested(_) => MessageType::Interested,
+            MessageAll::NotInterested(_) => MessageType::NotInterested,
+            MessageAll::Have(_) => MessageType::Have,
+            MessageAll::Bitfield(_) => MessageType::Bitfield,
+            MessageAll::Request(_) => MessageType::Request,
+            MessageAll::Piece(_) => MessageType::Piece,
+            MessageAll::Cancel(_) => MessageType::Cancel,
             MessageAll::KeepAlive(_) => unreachable!(),
         }
     }
@@ -132,18 +149,25 @@ impl Decoder for MessageFramer {
         let msg_type = src[4];
         src.advance(4 + length as usize);
 
-        let payload = match msg_type {
-            0 => Ok(MessageAll::Choke(NoPayload)),
-            1 => Ok(MessageAll::Unchoke(NoPayload)),
-            2 => Ok(MessageAll::Interested(NoPayload)),
-            3 => Ok(MessageAll::NotInterested(NoPayload)),
-            4 => Ok(MessageAll::Have(NoPayload)),
-            5 => Ok(MessageAll::Bitfield(BitfieldPayload::from_be_bytes(data))),
-            6 => Ok(MessageAll::Request(RequestPiecePayload::from_be_bytes(
-                data,
-            ))),
-            7 => Ok(MessageAll::Piece(ResponsePiecePayload::from_be_bytes(data))),
-            8 => Ok(MessageAll::Cancel(RequestPiecePayload::from_be_bytes(data))),
+        let payload = match serde_json::from_str::<MessageType>(&msg_type.to_string()) {
+            Ok(MessageType::Choke) => Ok(MessageAll::Choke(NoPayload)),
+            Ok(MessageType::Unchoke) => Ok(MessageAll::Unchoke(NoPayload)),
+            Ok(MessageType::Interested) => Ok(MessageAll::Interested(NoPayload)),
+            Ok(MessageType::NotInterested) => Ok(MessageAll::NotInterested(NoPayload)),
+            Ok(MessageType::Have) => Ok(MessageAll::Have(HavePayload::from_be_bytes(data))),
+
+            Ok(MessageType::Bitfield) => {
+                Ok(MessageAll::Bitfield(BitfieldPayload::from_be_bytes(data)))
+            }
+            Ok(MessageType::Request) => Ok(MessageAll::Request(
+                RequestPiecePayload::from_be_bytes(data),
+            )),
+            Ok(MessageType::Piece) => {
+                Ok(MessageAll::Piece(ResponsePiecePayload::from_be_bytes(data)))
+            }
+            Ok(MessageType::Cancel) => {
+                Ok(MessageAll::Cancel(RequestPiecePayload::from_be_bytes(data)))
+            }
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("Invalid message type: {:?}", src[4]),
@@ -174,7 +198,7 @@ impl Encoder<Message> for MessageFramer {
 
         // Write the length and string to the buffer.
         dst.extend_from_slice(&item.length.to_be_bytes());
-        dst.put_u8(item.get_msg_type());
+        dst.put_u8(item.get_msg_type() as u8);
         dst.extend_from_slice(item.payload.to_be_bytes().as_slice());
         Ok(())
     }

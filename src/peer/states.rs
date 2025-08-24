@@ -1,29 +1,32 @@
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PeerState {
-    Initial(InitialState),
-    Core(CoreState),
+    /// before anything happened
+    NotConnected,
+    /// if tcp connection is established
+    Connected,
+    /// after handshake succeeded
     DataTransfer,
 }
 impl Default for PeerState {
     fn default() -> Self {
-        PeerState::Initial(InitialState::default())
+        PeerState::NotConnected
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-pub enum InitialState {
-    #[default]
-    NotConnected,
-    Connected,
-    Handshake,
-}
+// #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+// pub enum InitialState {
+//     #[default]
+//     NotConnected,
+//     Connected,
+// }
 
-#[derive(Debug, Clone, Copy)]
-/// Choked means that we choked the peer
-pub enum CoreState {
-    ChokedNotInterested,
-    ChokedInterested,
-    UnchokedInterested,
-    /// after we downloaded all the pieces from a peer
-    UnchokedNotInterested,
-}
+// /// After the handshake succeeded, we are in the core state with coked and not interested
+// /// Choked means that we choked the peer
+// #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// pub enum CoreState {
+//     ChokedNotInterested = 0,
+//     ChokedInterested = 1,
+//     UnchokedInterested = 2,
+//     /// after we downloaded all the pieces from a peer
+//     UnchokedNotInterested = 3,
+// }

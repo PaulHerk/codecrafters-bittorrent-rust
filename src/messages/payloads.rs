@@ -1,8 +1,6 @@
-use crate::BLOCK_MAX;
-
 pub trait Payload {
     fn from_be_bytes(payload: &[u8]) -> Self;
-    fn to_be_bytes(self) -> Vec<u8>;
+    fn to_be_bytes(&self) -> Vec<u8>;
 }
 
 #[derive(Debug, Clone)]
@@ -23,7 +21,7 @@ impl Payload for BitfieldPayload {
         Self { pieces_available }
     }
 
-    fn to_be_bytes(self) -> Vec<u8> {
+    fn to_be_bytes(&self) -> Vec<u8> {
         todo!()
     }
 }
@@ -51,7 +49,7 @@ impl Payload for RequestPiecePayload {
             .unwrap()
             .0
     }
-    fn to_be_bytes(self) -> Vec<u8> {
+    fn to_be_bytes(&self) -> Vec<u8> {
         let mut bytes = vec![0u8; 12];
         bytes[0..4].copy_from_slice(&self.index.to_be_bytes());
         bytes[4..8].copy_from_slice(&self.begin.to_be_bytes());
@@ -60,25 +58,25 @@ impl Payload for RequestPiecePayload {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct ResponsePiecePayload {
     pub index: u32,
     pub begin: u32,
-    pub block: [u8; BLOCK_MAX as usize],
+    pub block: Vec<u8>,
 }
 
 impl Payload for ResponsePiecePayload {
     fn from_be_bytes(bytes: &[u8]) -> Self {
-        let mut block = [0u8; BLOCK_MAX as usize];
         let block_length = bytes.len() - 8;
+        let mut block = vec![0u8; block_length as usize];
         block[..block_length as usize].copy_from_slice(&bytes[8..8 + block_length as usize]);
         Self {
             index: u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
             begin: u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]),
-            block,
+            block: block.to_vec(),
         }
     }
-    fn to_be_bytes(self) -> Vec<u8> {
+    fn to_be_bytes(&self) -> Vec<u8> {
         let mut bytes = vec![0u8; 8 + self.block.len() as usize];
         bytes[0..4].copy_from_slice(&self.index.to_be_bytes());
         bytes[4..8].copy_from_slice(&self.begin.to_be_bytes());
@@ -89,12 +87,36 @@ impl Payload for ResponsePiecePayload {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub struct HavePayload {
+    /// a single number, the index which that downloader just completed and checked the hash of
+    /// no idea if it's a u32 or u8 or what
+    pub piece_index: u32,
+}
+
+impl Payload for HavePayload {
+    fn from_be_bytes(payload: &[u8]) -> Self {
+        HavePayload {
+            piece_index: u32::from_be_bytes(
+                payload[0..4]
+                    .try_into()
+                    .expect("The have payload is apparently not 4 bytes…"),
+            ),
+        }
+    }
+    fn to_be_bytes(&self) -> Vec<u8> {
+        let mut bytes = vec![0u8; 4];
+        bytes[0..4].copy_from_slice(&self.piece_index.to_be_bytes());
+        bytes
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct NoPayload;
 impl Payload for NoPayload {
     fn from_be_bytes(_payload: &[u8]) -> Self {
         Self
     }
-    fn to_be_bytes(self) -> Vec<u8> {
+    fn to_be_bytes(&self) -> Vec<u8> {
         vec![]
     }
 }

@@ -3,7 +3,6 @@ use clap::{Parser, Subcommand};
 use codecrafters_bittorrent::*;
 use reqwest::Url;
 use serde_bencode;
-use sha1::{Digest, Sha1};
 use std::io::Write;
 use std::net::SocketAddrV4;
 use std::path::PathBuf;
@@ -94,13 +93,13 @@ async fn main() -> anyhow::Result<()> {
             torrent,
             piece: piece_i,
         } => {
-            let torrent = read_torrent(torrent)?;
-            assert!(*piece_i < torrent.info.pieces.0.len() as u32); // piece starts at 0
-            let all_blocks = download_piece(&torrent, *piece_i).await?;
+            // let torrent = read_torrent(torrent)?;
+            // assert!(*piece_i < torrent.info.pieces.0.len() as u32); // piece starts at 0
+            // let all_blocks = download_piece(&torrent, *piece_i).await?;
 
-            let mut file = std::fs::File::create(output).context("create downloaded file")?;
-            file.write_all(&all_blocks)
-                .context("write downloaded file")?;
+            // let mut file = std::fs::File::create(output).context("create downloaded file")?;
+            // file.write_all(&all_blocks)
+            //     .context("write downloaded file")?;
         }
         DecodeMetadataType::Download { output, torrent } => {
             let torrent = read_torrent(torrent)?;
@@ -108,13 +107,22 @@ async fn main() -> anyhow::Result<()> {
                 Some(output) => output,
                 None => &PathBuf::from(&torrent.info.name),
             };
+            let length = torrent.get_length();
+            let response = get_response(&torrent, length).await?;
+            let mut peer = Peer::new(*PEER_ID, response.peers[1].get_socket_addr());
+
+            let framed = peer
+                .shake_hands_get_framed(torrent.info_hash()?)
+                .await
+                .context("shake hands")?;
+            let peer_data = PeerData::new(torrent, &[]);
+
+            peer.event_loop(framed, peer_data.clone()).await?;
+
             let mut file = std::fs::File::create(output).context("create downloaded file")?;
-            println!("Downloading {} pieces", torrent.info.pieces.0.len());
-            for piece_i in 0..torrent.info.pieces.0.len() as u32 {
-                let all_blocks = download_piece(&torrent, piece_i).await?;
-                file.write_all(&all_blocks)
-                    .context("write downloaded file")?;
-            }
+            let data = peer_data.get_data();
+
+            file.write_all(&data).context("write downloaded file")?;
         }
     }
     Ok(())
@@ -147,67 +155,4 @@ async fn get_response(torrent: &Torrent, length: u32) -> anyhow::Result<TrackerR
 
     serde_bencode::from_bytes::<TrackerResponse>(&response_bytes)
         .context("deserialize tracker response")
-}
-
-async fn download_piece(torrent: &Torrent, piece_i: u32) -> anyhow::Result<Vec<u8>> {
-    let length = get_length(&torrent);
-    let response = get_response(&torrent, length).await?;
-    let mut peer = Peer::new(
-        // response.peers[1].peer_id.into_array(),
-        [0; 20],
-        response.peers[1].get_socket_addr(),
-    );
-
-    let framed = peer
-        .shake_hands_get_framed(torrent.info_hash()?)
-        .await
-        .context("shake hands")?;
-
-    let mut connection = Connection::init_data_exchange(framed)
-        .await
-        .context("init")?;
-    let piece_hash = torrent
-        .info
-        .pieces
-        .0
-        .get(piece_i as usize)
-        .context("piece not found")?;
-    let piece_size = if piece_i == torrent.info.pieces.0.len() as u32 - 1
-        && length % torrent.info.piece_length != 0
-    {
-        length % torrent.info.piece_length
-    } else {
-        torrent.info.piece_length
-    };
-    // the "+ BLOCK_MAX - 1" rounds up
-    let nblocks = (piece_size + BLOCK_MAX - 1) / BLOCK_MAX;
-    eprintln!("{nblocks} blocks of at most {BLOCK_MAX} to reach {piece_size}");
-
-    let mut all_blocks = vec![0_u8; piece_size as usize];
-    for block in 0..nblocks {
-        let block_length = if block == nblocks - 1 && piece_size % BLOCK_MAX != 0 {
-            piece_size % BLOCK_MAX
-        } else {
-            BLOCK_MAX
-        };
-        let request_payload = RequestPiecePayload::new(piece_i, block * BLOCK_MAX, block_length);
-        let response = connection
-            .get_block(request_payload)
-            .await
-            .context(format!("download piece {}", block))?;
-        assert_eq!(response.index, piece_i);
-
-        all_blocks[response.begin as usize..block_length as usize + response.begin as usize]
-            .copy_from_slice(&response.block[..block_length as usize]);
-    }
-
-    let mut sha1 = Sha1::new();
-    sha1.update(&all_blocks);
-    let hash: [u8; 20] = sha1
-        .finalize()
-        .try_into()
-        .expect("GenericArray<_, 20> == [u8; 20]");
-    assert_eq!(piece_hash, &hash);
-
-    Ok(all_blocks)
 }
