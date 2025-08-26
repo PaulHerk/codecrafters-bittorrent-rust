@@ -131,7 +131,6 @@ impl PeerData {
         *block_state = BlockState::InProgress;
 
         let req = RequestPiecePayload::new(piece_i as u32, block_begin, block_len);
-        dbg!(req);
 
         Some(req)
     }
@@ -170,13 +169,7 @@ impl PeerData {
     }
 
     pub fn get_data(&self) -> Option<Vec<u8>> {
-        if self
-            .have
-            .lock()
-            .unwrap()
-            .iter()
-            .all(|b| b == &PieceState::Complete)
-        {
+        if !self.have.lock().unwrap().iter().all(|b| b.is_complete()) {
             return None;
         };
 

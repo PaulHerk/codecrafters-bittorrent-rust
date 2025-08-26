@@ -123,11 +123,16 @@ async fn main() -> anyhow::Result<()> {
                 let peer_data = peer_data.clone();
                 let handle = tokio::spawn(async move {
                     peer.event_loop(framed, peer_data).await.unwrap();
+                    ()
                 });
                 peers.push(handle);
             }
-
-            peers.iter_mut().next().unwrap().await?; // TODO: actually let the fastest peer win
+            let mut peers = peers.into_iter();
+            let _ = tokio::join!(
+                peers.next().unwrap(),
+                peers.next().unwrap(),
+                peers.next().unwrap()
+            ); // TODO
 
             let mut file = std::fs::File::create(output).context("create downloaded file")?;
             let data = peer_data.get_data().context("get data")?;
