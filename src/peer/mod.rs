@@ -21,8 +21,28 @@ pub struct PeerData {
     /// each piece is a Vec of blocks
     /// each block is a Vec of bytes
     pieces: Arc<Mutex<Vec<Vec<Vec<u8>>>>>,
-    /// (which pieces we have, which blocks we have for each piece)
-    have: Arc<Mutex<Vec<(bool, Vec<bool>)>>>,
+    have: Arc<Mutex<Vec<PieceState>>>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+enum BlockState {
+    None,
+    InProgress,
+    Complete,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+enum PieceState {
+    Incomplete(Vec<BlockState>),
+    Complete,
+}
+impl PieceState {
+    fn is_complete(&self) -> bool {
+        match self {
+            PieceState::Complete => true,
+            PieceState::Incomplete(blocks) => blocks.iter().all(|b| *b == BlockState::Complete),
+        }
+    }
 }
 
 impl PeerData {
@@ -49,7 +69,10 @@ impl PeerData {
             eprintln!("{nblocks} blocks of at most {BLOCK_MAX} to reach {piece_size}");
 
             pieces.push(Vec::with_capacity(piece_size as usize));
-            have.push((false, vec![false; nblocks as usize]));
+            have.push(PieceState::Incomplete(vec![
+                BlockState::None;
+                nblocks as usize
+            ]));
 
             for block_i in 0..nblocks {
                 let block_length = if block_i == nblocks - 1 && piece_size % BLOCK_MAX != 0 {
@@ -64,10 +87,13 @@ impl PeerData {
                 pieces[piece_i as usize].push(Vec::with_capacity(block_length as usize));
                 if let Some(block) = bytes.get(range) {
                     pieces[piece_i as usize][block_i as usize].copy_from_slice(block);
-                    have[piece_i as usize].1[block_i as usize] = true;
+                    let PieceState::Incomplete(blocks) = &mut have[piece_i as usize] else {
+                        unreachable!()
+                    };
+                    blocks[block_i as usize] = BlockState::Complete;
                 }
-                if have[piece_i as usize].1.iter().all(|&b| b) {
-                    have[piece_i as usize].0 = true;
+                if have[piece_i as usize].is_complete() {
+                    have[piece_i as usize] = PieceState::Complete;
                 }
             }
         }
@@ -80,20 +106,32 @@ impl PeerData {
     /// returns the next piece and block begin that we need to request
     /// if we have all the blocks of a piece, we return None
     fn prepare_next_req_send(&self) -> Option<RequestPiecePayload> {
-        let have = self.have.lock().unwrap();
-        let (piece_i, (_, blocks)) = have
-            .iter()
+        // TODO: consider which blocks are already in progress
+        let have = &mut self.have.lock().unwrap();
+        let (piece_i, blocks_state) =
+            have.iter_mut()
+                .enumerate()
+                .find_map(|(piece_i, piece_state)| match piece_state {
+                    PieceState::Incomplete(blocks)
+                        if blocks.iter().find(|b| *b == &BlockState::None).is_some() =>
+                    {
+                        Some((piece_i, blocks))
+                    }
+                    _ => None,
+                })?;
+        let (block_i, block_state) = blocks_state
+            .iter_mut()
             .enumerate()
-            .find(|(_i, (piece, _blocks))| !piece)?;
-        let block_i = blocks
-            .iter()
-            .position(|&b| !b)
-            .expect("there should be an empty block if the have field for a piece is false")
-            as u32;
+            .find(|(_i, b)| *b == &BlockState::None)
+            .expect("there should be an empty if there's a piece that is incomplete");
+        let block_i = block_i as u32;
         let block_begin = block_i * BLOCK_MAX;
         let block_len = self.pieces.lock().unwrap()[piece_i][block_i as usize].capacity() as u32;
 
+        *block_state = BlockState::InProgress;
+
         let req = RequestPiecePayload::new(piece_i as u32, block_begin, block_len);
+        dbg!(req);
 
         Some(req)
     }
@@ -105,11 +143,15 @@ impl PeerData {
         piece[block_i as usize].append(&mut payload.block.to_vec());
 
         let have = &mut self.have.lock().unwrap()[payload.index as usize];
-        have.1[block_i as usize] = true;
+        let PieceState::Incomplete(blocks_state) = have else {
+            unreachable!()
+        };
+        blocks_state[block_i as usize] = BlockState::Complete;
 
         // calculate the hash of the torrent if we have a piece
         let torrent = self.torrent.lock().unwrap();
-        if have.1.iter().all(|&b| b) {
+        if have.is_complete() && have != &PieceState::Complete {
+            // the second condition should always be false
             eprintln!("piece {} complete", payload.index);
             let mut sha1 = Sha1::new();
             sha1.update(piece.concat());
@@ -118,25 +160,37 @@ impl PeerData {
                 .try_into()
                 .expect("GenericArray<_, 20> == [u8; 20]");
             let torrent_hash = torrent.info.pieces.0[payload.index as usize];
+            dbg!(payload.index);
             assert_eq!(hash, torrent_hash);
 
-            have.0 = true;
+            println!("piece {} complete", payload.index);
+            *have = PieceState::Complete;
         }
         Ok(())
     }
 
-    pub fn get_data(&self) -> Vec<u8> {
+    pub fn get_data(&self) -> Option<Vec<u8>> {
+        if self
+            .have
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|b| b == &PieceState::Complete)
+        {
+            return None;
+        };
+
         let mut data = Vec::new();
         for piece in self.pieces.lock().unwrap().iter() {
             for block in piece.iter() {
                 data.extend_from_slice(block.as_slice());
             }
         }
-        data
+        Some(data)
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Peer {
     pub peer_id: [u8; 20],
     pub addr: SocketAddrV4,
@@ -182,6 +236,8 @@ impl Peer {
         self.state = PeerState::DataTransfer;
 
         let framed = Framed::new(tcp, MessageFramer);
+
+        println!("peer {} connected", self.addr);
         Ok(framed)
     }
 
@@ -211,10 +267,11 @@ impl Peer {
 
         self.we_are_interested = true;
 
+        let req = peer_data
+            .prepare_next_req_send()
+            .expect("we should have pieces to request");
         framed
-            .send(Message::new(MessageAll::Request(RequestPiecePayload::new(
-                0, 0, BLOCK_MAX,
-            ))))
+            .send(Message::new(MessageAll::Request(req)))
             .await
             .context("send request")?;
 

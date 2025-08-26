@@ -109,18 +109,28 @@ async fn main() -> anyhow::Result<()> {
             };
             let length = torrent.get_length();
             let response = get_response(&torrent, length).await?;
-            let mut peer = Peer::new(*PEER_ID, response.peers[1].get_socket_addr());
 
-            let framed = peer
-                .shake_hands_get_framed(torrent.info_hash()?)
-                .await
-                .context("shake hands")?;
+            let info_hash = torrent.info_hash()?;
             let peer_data = PeerData::new(torrent, &[]);
+            let mut peers = Vec::new();
+            for peer in response.peers.iter() {
+                let mut peer = Peer::new(*PEER_ID, peer.get_socket_addr());
+                let framed = peer
+                    .shake_hands_get_framed(info_hash)
+                    .await
+                    .context("shake hands")?;
 
-            peer.event_loop(framed, peer_data.clone()).await?;
+                let peer_data = peer_data.clone();
+                let handle = tokio::spawn(async move {
+                    peer.event_loop(framed, peer_data).await.unwrap();
+                });
+                peers.push(handle);
+            }
+
+            peers.iter_mut().next().unwrap().await?; // TODO: actually let the fastest peer win
 
             let mut file = std::fs::File::create(output).context("create downloaded file")?;
-            let data = peer_data.get_data();
+            let data = peer_data.get_data().context("get data")?;
 
             file.write_all(&data).context("write downloaded file")?;
         }
