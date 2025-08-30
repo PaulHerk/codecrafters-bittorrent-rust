@@ -1,6 +1,7 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use codecrafters_bittorrent::*;
+use futures_util::future::join_all;
 use reqwest::Url;
 use serde_bencode;
 use std::io::Write;
@@ -127,12 +128,7 @@ async fn main() -> anyhow::Result<()> {
                 });
                 peers.push(handle);
             }
-            let mut peers = peers.into_iter();
-            let _ = tokio::join!(
-                peers.next().unwrap(),
-                peers.next().unwrap(),
-                peers.next().unwrap()
-            ); // TODO
+            join_all(peers.into_iter()).await;
 
             let mut file = std::fs::File::create(output).context("create downloaded file")?;
             let data = peer_data.get_data().context("get data")?;

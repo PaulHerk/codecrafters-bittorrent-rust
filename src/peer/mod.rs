@@ -1,4 +1,5 @@
 use futures_util::{SinkExt, StreamExt};
+use rand::seq::IteratorRandom;
 use sha1::{Digest, Sha1};
 use std::net::SocketAddrV4;
 use std::sync::{Arc, Mutex};
@@ -105,25 +106,30 @@ impl PeerData {
     }
     /// returns the next piece and block begin that we need to request
     /// if we have all the blocks of a piece, we return None
-    fn prepare_next_req_send(&self) -> Option<RequestPiecePayload> {
-        // TODO: consider which blocks are already in progress
+    fn prepare_next_req_send(&self, peer_has: &[bool]) -> Option<RequestPiecePayload> {
         let have = &mut self.have.lock().unwrap();
-        let (piece_i, blocks_state) =
-            have.iter_mut()
-                .enumerate()
-                .find_map(|(piece_i, piece_state)| match piece_state {
-                    PieceState::Incomplete(blocks)
-                        if blocks.iter().find(|b| *b == &BlockState::None).is_some() =>
-                    {
-                        Some((piece_i, blocks))
-                    }
-                    _ => None,
-                })?;
+        let mut rng = rand::rng();
+
+        let all_pieces = have.iter_mut().zip(peer_has.iter()).enumerate();
+        let (piece_i, blocks_state) = all_pieces
+            .filter_map(|(piece_i, (piece_state, peer_has))| match piece_state {
+                PieceState::Incomplete(blocks)
+                    if *peer_has && blocks.iter().find(|b| *b == &BlockState::None).is_some() =>
+                {
+                    Some((piece_i, blocks))
+                }
+                _ => None,
+            })
+            .choose(&mut rng)?;
+        // TODO: this is not necessarily performant since we filter all elements but the just choose one
+
         let (block_i, block_state) = blocks_state
             .iter_mut()
             .enumerate()
-            .find(|(_i, b)| *b == &BlockState::None)
+            .filter(|(_i, b)| *b == &BlockState::None)
+            .choose(&mut rng)
             .expect("there should be an empty if there's a piece that is incomplete");
+        // TODO: same as above
         let block_i = block_i as u32;
         let block_begin = block_i * BLOCK_MAX;
         let block_len = self.pieces.lock().unwrap()[piece_i][block_i as usize].capacity() as u32;
@@ -134,7 +140,9 @@ impl PeerData {
 
         Some(req)
     }
-    fn add_block(&self, payload: ResponsePiecePayload) -> anyhow::Result<()> {
+
+    /// returns true if the block was added (hashs match)
+    fn add_block(&self, payload: ResponsePiecePayload) -> bool {
         // the "+ BLOCK_MAX - 1" rounds up
         let block_i = (payload.begin + BLOCK_MAX - 1) / BLOCK_MAX;
 
@@ -145,13 +153,14 @@ impl PeerData {
         let PieceState::Incomplete(blocks_state) = have else {
             unreachable!()
         };
+        let nblocks = blocks_state.len();
         blocks_state[block_i as usize] = BlockState::Complete;
 
         // calculate the hash of the torrent if we have a piece
         let torrent = self.torrent.lock().unwrap();
-        if have.is_complete() && have != &PieceState::Complete {
+        let is_complete = have.is_complete() && have != &PieceState::Complete;
+        if is_complete.clone() {
             // the second condition should always be false
-            eprintln!("piece {} complete", payload.index);
             let mut sha1 = Sha1::new();
             sha1.update(piece.concat());
             let hash: [u8; 20] = sha1
@@ -159,13 +168,17 @@ impl PeerData {
                 .try_into()
                 .expect("GenericArray<_, 20> == [u8; 20]");
             let torrent_hash = torrent.info.pieces.0[payload.index as usize];
-            dbg!(payload.index);
-            assert_eq!(hash, torrent_hash);
+            if hash != torrent_hash {
+                piece[block_i as usize].clear();
+                *have = PieceState::Incomplete(vec![BlockState::None; nblocks]);
+                return false;
+            }
 
             println!("piece {} complete", payload.index);
             *have = PieceState::Complete;
+            // TODO: send have msg
         }
-        Ok(())
+        true
     }
 
     pub fn get_data(&self) -> Option<Vec<u8>> {
@@ -183,7 +196,7 @@ impl PeerData {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Peer {
     pub peer_id: [u8; 20],
     pub addr: SocketAddrV4,
@@ -192,6 +205,7 @@ pub struct Peer {
     pub we_are_interested: bool,
     pub is_choking: bool,
     pub is_interested: bool,
+    pub has: Vec<bool>,
 }
 
 impl Peer {
@@ -204,6 +218,7 @@ impl Peer {
             we_are_interested: false,
             is_choking: true,
             is_interested: false,
+            has: Vec::new(),
         }
     }
     /// info_hash: the info hash of the torrent
@@ -250,7 +265,14 @@ impl Peer {
             .expect("peer should send bitfield")
             .context("peer msg was invalid")?;
         assert_eq!(bitfield.get_msg_type(), MessageType::Bitfield);
-        // NOTE: we assume that all the peers have all the data
+        let MessageAll::Bitfield(bitfield) = bitfield.payload else {
+            unreachable!();
+        };
+        self.has = bitfield.pieces_available;
+
+        let Some(req) = peer_data.prepare_next_req_send(&self.has) else {
+            todo!(); // sever connection
+        };
 
         let interested_msg: Message = Message::new(MessageAll::Interested(NoPayload));
         framed
@@ -260,9 +282,6 @@ impl Peer {
 
         self.we_are_interested = true;
 
-        let req = peer_data
-            .prepare_next_req_send()
-            .expect("we should have pieces to request");
         framed
             .send(Message::new(MessageAll::Request(req)))
             .await
@@ -284,8 +303,8 @@ impl Peer {
                 MessageAll::Bitfield(bitfield_payload) => todo!(),
                 MessageAll::Request(request_piece_payload) => todo!(),
                 MessageAll::Piece(response_piece_payload) => {
-                    peer_data.add_block(response_piece_payload)?;
-                    if let Some(req) = peer_data.prepare_next_req_send() {
+                    peer_data.add_block(response_piece_payload);
+                    if let Some(req) = peer_data.prepare_next_req_send(&self.has) {
                         framed
                             .send(Message::new(MessageAll::Request(req)))
                             .await
