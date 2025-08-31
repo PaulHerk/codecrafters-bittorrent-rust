@@ -1,10 +1,8 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use codecrafters_bittorrent::*;
-use futures_util::future::join_all;
 use reqwest::Url;
 use serde_bencode;
-use std::io::Write;
 use std::net::SocketAddrV4;
 use std::path::PathBuf;
 
@@ -113,7 +111,7 @@ async fn main() -> anyhow::Result<()> {
 
             let info_hash = torrent.info_hash()?;
             let peer_data = PeerData::new(torrent, &[]);
-            let mut peers = Vec::new();
+            let (tx, rx) = tokio::sync::broadcast::channel(10);
             for peer in response.peers.iter() {
                 let mut peer = Peer::new(*PEER_ID, peer.get_socket_addr());
                 let framed = peer
@@ -122,20 +120,20 @@ async fn main() -> anyhow::Result<()> {
                     .context("shake hands")?;
 
                 let peer_data = peer_data.clone();
-                let handle = tokio::spawn(async move {
-                    peer.event_loop(framed, peer_data).await.unwrap();
-                    ()
+                let rx = tx.subscribe();
+                let tx = tx.clone();
+                tokio::spawn(async move {
+                    peer.event_loop(framed, peer_data, (tx, rx)).await.unwrap();
                 });
-                peers.push(handle);
             }
-            join_all(peers.into_iter()).await;
 
-            let mut file = std::fs::File::create(output).context("create downloaded file")?;
-            let data = peer_data.get_data().context("get data")?;
+            let file = std::fs::File::create(output).context("create downloaded file")?;
+            peer_data.write_file(file, rx).await.context("write file")?;
 
-            file.write_all(&data).context("write downloaded file")?;
+            loop {}
         }
     }
+
     Ok(())
 }
 

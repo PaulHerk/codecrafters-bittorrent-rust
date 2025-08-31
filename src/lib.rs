@@ -5,15 +5,16 @@ pub mod tracker;
 
 use std::collections::HashMap;
 
-pub use self::messages::payloads::*;
-pub use self::messages::*;
-pub use self::peer::*;
-pub use self::torrent::*;
-pub use self::tracker::*;
+pub use messages::payloads::*;
+pub use messages::*;
 pub use peer::handshake::*;
+pub use peer::peer_data::*;
 pub use peer::states::*;
+pub use peer::*;
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
+pub use torrent::*;
+pub use tracker::*;
 
 pub const BLOCK_MAX: u32 = 1 << 14;
 

@@ -1,8 +1,7 @@
-use futures_util::{SinkExt, StreamExt};
-use rand::seq::IteratorRandom;
-use sha1::{Digest, Sha1};
+use futures_util::stream::unfold;
+use futures_util::{self, SinkExt, StreamExt};
 use std::net::SocketAddrV4;
-use std::sync::{Arc, Mutex};
+use tokio::sync::broadcast::{Receiver, Sender};
 use tokio_util::codec::Framed;
 
 use anyhow::Context;
@@ -12,200 +11,27 @@ use crate::states::PeerState;
 use crate::{messages::*, *};
 
 pub mod handshake;
+pub mod peer_data;
 pub mod states;
-
-/// this struct is passed to all the peers
-#[derive(Debug, Clone)]
-pub struct PeerData {
-    torrent: Arc<Mutex<Torrent>>,
-    /// multiple pieces
-    /// each piece is a Vec of blocks
-    /// each block is a Vec of bytes
-    pieces: Arc<Mutex<Vec<Vec<Vec<u8>>>>>,
-    have: Arc<Mutex<Vec<PieceState>>>,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-enum BlockState {
-    None,
-    InProgress,
-    Complete,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-enum PieceState {
-    Incomplete(Vec<BlockState>),
-    Complete,
-}
-impl PieceState {
-    fn is_complete(&self) -> bool {
-        match self {
-            PieceState::Complete => true,
-            PieceState::Incomplete(blocks) => blocks.iter().all(|b| *b == BlockState::Complete),
-        }
-    }
-}
-
-impl PeerData {
-    pub fn new(torrent: Torrent, bytes: &[u8]) -> Self {
-        let length = torrent.get_length();
-
-        let mut pieces: Vec<Vec<Vec<u8>>> = Vec::with_capacity(torrent.info.pieces.0.len());
-        let mut have = Vec::with_capacity(torrent.info.pieces.0.len());
-
-        // what this loop does:
-        // 1. put the bytes into the pieces Vec
-        // 2. allocate the exact space needed if the bytes are yet to be recieved
-        // 3. initialize the have Vec
-        for piece_i in 0..torrent.info.pieces.0.len() as u32 {
-            let piece_size = if piece_i == torrent.info.pieces.0.len() as u32 - 1
-                && length % torrent.info.piece_length != 0
-            {
-                length % torrent.info.piece_length
-            } else {
-                torrent.info.piece_length
-            };
-            // the "+ BLOCK_MAX - 1" rounds up
-            let nblocks = (piece_size + BLOCK_MAX - 1) / BLOCK_MAX;
-            eprintln!("{nblocks} blocks of at most {BLOCK_MAX} to reach {piece_size}");
-
-            pieces.push(Vec::with_capacity(piece_size as usize));
-            have.push(PieceState::Incomplete(vec![
-                BlockState::None;
-                nblocks as usize
-            ]));
-
-            for block_i in 0..nblocks {
-                let block_length = if block_i == nblocks - 1 && piece_size % BLOCK_MAX != 0 {
-                    piece_size % BLOCK_MAX
-                } else {
-                    BLOCK_MAX
-                };
-
-                let range =
-                    (block_i * BLOCK_MAX) as usize..(block_i * BLOCK_MAX + block_length) as usize;
-
-                pieces[piece_i as usize].push(Vec::with_capacity(block_length as usize));
-                if let Some(block) = bytes.get(range) {
-                    pieces[piece_i as usize][block_i as usize].copy_from_slice(block);
-                    let PieceState::Incomplete(blocks) = &mut have[piece_i as usize] else {
-                        unreachable!()
-                    };
-                    blocks[block_i as usize] = BlockState::Complete;
-                }
-                if have[piece_i as usize].is_complete() {
-                    have[piece_i as usize] = PieceState::Complete;
-                }
-            }
-        }
-        Self {
-            torrent: Arc::new(Mutex::new(torrent)),
-            pieces: Arc::new(Mutex::new(pieces)),
-            have: Arc::new(Mutex::new(have)),
-        }
-    }
-    /// returns the next piece and block begin that we need to request
-    /// if we have all the blocks of a piece, we return None
-    fn prepare_next_req_send(&self, peer_has: &[bool]) -> Option<RequestPiecePayload> {
-        let have = &mut self.have.lock().unwrap();
-        let mut rng = rand::rng();
-
-        let all_pieces = have.iter_mut().zip(peer_has.iter()).enumerate();
-        let (piece_i, blocks_state) = all_pieces
-            .filter_map(|(piece_i, (piece_state, peer_has))| match piece_state {
-                PieceState::Incomplete(blocks)
-                    if *peer_has && blocks.iter().find(|b| *b == &BlockState::None).is_some() =>
-                {
-                    Some((piece_i, blocks))
-                }
-                _ => None,
-            })
-            .choose(&mut rng)?;
-        // TODO: this is not necessarily performant since we filter all elements but the just choose one
-
-        let (block_i, block_state) = blocks_state
-            .iter_mut()
-            .enumerate()
-            .filter(|(_i, b)| *b == &BlockState::None)
-            .choose(&mut rng)
-            .expect("there should be an empty if there's a piece that is incomplete");
-        // TODO: same as above
-        let block_i = block_i as u32;
-        let block_begin = block_i * BLOCK_MAX;
-        let block_len = self.pieces.lock().unwrap()[piece_i][block_i as usize].capacity() as u32;
-
-        *block_state = BlockState::InProgress;
-
-        let req = RequestPiecePayload::new(piece_i as u32, block_begin, block_len);
-
-        Some(req)
-    }
-
-    /// returns true if the block was added (hashs match)
-    fn add_block(&self, payload: ResponsePiecePayload) -> bool {
-        // the "+ BLOCK_MAX - 1" rounds up
-        let block_i = (payload.begin + BLOCK_MAX - 1) / BLOCK_MAX;
-
-        let piece = &mut self.pieces.lock().unwrap()[payload.index as usize];
-        piece[block_i as usize].append(&mut payload.block.to_vec());
-
-        let have = &mut self.have.lock().unwrap()[payload.index as usize];
-        let PieceState::Incomplete(blocks_state) = have else {
-            unreachable!()
-        };
-        let nblocks = blocks_state.len();
-        blocks_state[block_i as usize] = BlockState::Complete;
-
-        // calculate the hash of the torrent if we have a piece
-        let torrent = self.torrent.lock().unwrap();
-        let is_complete = have.is_complete() && have != &PieceState::Complete;
-        if is_complete.clone() {
-            // the second condition should always be false
-            let mut sha1 = Sha1::new();
-            sha1.update(piece.concat());
-            let hash: [u8; 20] = sha1
-                .finalize()
-                .try_into()
-                .expect("GenericArray<_, 20> == [u8; 20]");
-            let torrent_hash = torrent.info.pieces.0[payload.index as usize];
-            if hash != torrent_hash {
-                piece[block_i as usize].clear();
-                *have = PieceState::Incomplete(vec![BlockState::None; nblocks]);
-                return false;
-            }
-
-            println!("piece {} complete", payload.index);
-            *have = PieceState::Complete;
-            // TODO: send have msg
-        }
-        true
-    }
-
-    pub fn get_data(&self) -> Option<Vec<u8>> {
-        if !self.have.lock().unwrap().iter().all(|b| b.is_complete()) {
-            return None;
-        };
-
-        let mut data = Vec::new();
-        for piece in self.pieces.lock().unwrap().iter() {
-            for block in piece.iter() {
-                data.extend_from_slice(block.as_slice());
-            }
-        }
-        Some(data)
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct Peer {
     pub peer_id: [u8; 20],
     pub addr: SocketAddrV4,
     pub state: PeerState,
-    pub we_are_choked: bool,
-    pub we_are_interested: bool,
-    pub is_choking: bool,
-    pub is_interested: bool,
+    pub am_choking: bool,
+    pub am_interested: bool,
+    pub peer_choking: bool,
+    pub peer_interested: bool,
     pub has: Vec<bool>,
+}
+
+/// this enum is used to select between different stream-types
+enum Msg {
+    /// this is sent by other peers in order for this particular peer to announce that it has the piece
+    HavePayload(HavePayload),
+    Data(Message),
+    Timeout,
 }
 
 impl Peer {
@@ -214,10 +40,10 @@ impl Peer {
             peer_id,
             addr,
             state: PeerState::default(),
-            we_are_choked: true,
-            we_are_interested: false,
-            is_choking: true,
-            is_interested: false,
+            am_choking: true,
+            am_interested: false,
+            peer_choking: true,
+            peer_interested: false,
             has: Vec::new(),
         }
     }
@@ -253,10 +79,11 @@ impl Peer {
         &mut self,
         mut framed: MsgFrameType,
         peer_data: PeerData,
+        (tx, rx): (Sender<HavePayload>, Receiver<HavePayload>),
     ) -> anyhow::Result<()> {
         assert_eq!(self.state, PeerState::DataTransfer);
         // TODO: check if we are interested or not
-        self.we_are_choked = false;
+        self.am_choking = false;
 
         // TODO: check if downloading or uploading?
         let bitfield: Message = framed
@@ -271,6 +98,7 @@ impl Peer {
         self.has = bitfield.pieces_available;
 
         let Some(req) = peer_data.prepare_next_req_send(&self.has) else {
+            return Ok(());
             todo!(); // sever connection
         };
 
@@ -280,42 +108,86 @@ impl Peer {
             .await
             .context("write interested frame")?;
 
-        self.we_are_interested = true;
+        self.am_interested = true;
 
         framed
             .send(Message::new(MessageAll::Request(req)))
             .await
             .context("send request")?;
 
-        loop {
+        let (mut framed_tx, framed_rx) = framed.split();
+
+        let peer_msg_stream = unfold(framed_rx, |mut framed| async move {
             let Ok(Ok(message)) = framed.next().await.context("read message") else {
-                continue;
+                return None;
             };
-            match message.payload {
-                MessageAll::Choke(_no_payload) => {
-                    self.is_choking = true;
-                    return Err(anyhow::anyhow!("peer is choked"));
-                }
-                MessageAll::Unchoke(_no_payload) => self.is_choking = false,
-                MessageAll::Interested(_no_payload) => self.is_interested = true,
-                MessageAll::NotInterested(_no_payload) => self.is_interested = false,
-                MessageAll::Have(have_payload) => todo!(),
-                MessageAll::Bitfield(bitfield_payload) => todo!(),
-                MessageAll::Request(request_piece_payload) => todo!(),
-                MessageAll::Piece(response_piece_payload) => {
-                    peer_data.add_block(response_piece_payload);
-                    if let Some(req) = peer_data.prepare_next_req_send(&self.has) {
-                        framed
-                            .send(Message::new(MessageAll::Request(req)))
+            Some((Msg::Data(message), framed))
+        });
+        tokio::pin!(peer_msg_stream);
+
+        // this is the stream sent by other connections to peers to send have messages
+        let have_stream = unfold(rx, |mut rx| async move {
+            let Ok(have_payload) = rx.recv().await else {
+                return None;
+            };
+            Some((Msg::HavePayload(have_payload), rx))
+        });
+        tokio::pin!(have_stream);
+
+        let timeout = tokio::time::interval(std::time::Duration::from_secs(120));
+        let timeout_stream = unfold(timeout, |mut timeout| async move {
+            timeout.tick().await;
+            Some((Msg::Timeout, timeout))
+        });
+        tokio::pin!(timeout_stream);
+
+        let mut stream = futures_util::stream_select!(peer_msg_stream, have_stream, timeout_stream);
+
+        loop {
+            if let Some(message) = stream.next().await {
+                match message {
+                    Msg::HavePayload(have_payload) => {
+                        dbg!(self.addr);
+                        framed_tx
+                            .send(Message::new(MessageAll::Have(dbg!(have_payload))))
                             .await
-                            .context("send request")?;
-                    } else {
-                        // let's pretend we are done
-                        return Ok(());
+                            .context("send have")?;
                     }
+                    Msg::Data(message) => {
+                        match message.payload {
+                            MessageAll::Choke(_no_payload) => {
+                                self.peer_choking = true;
+                                return Err(anyhow::anyhow!("peer is choked"));
+                            }
+                            MessageAll::Unchoke(_no_payload) => self.peer_choking = false,
+                            MessageAll::Interested(_no_payload) => self.peer_interested = true,
+                            MessageAll::NotInterested(_no_payload) => self.peer_interested = false,
+                            MessageAll::Have(have_payload) => todo!(),
+                            MessageAll::Bitfield(bitfield_payload) => todo!(),
+                            MessageAll::Request(request_piece_payload) => todo!(),
+                            MessageAll::Piece(response_piece_payload) => {
+                                if let Some(index) = peer_data.add_block(response_piece_payload) {
+                                    let have_payload = HavePayload { piece_index: index };
+                                    tx.send(have_payload).unwrap();
+                                }
+                                if let Some(req) = peer_data.prepare_next_req_send(&self.has) {
+                                    framed_tx
+                                        .send(Message::new(MessageAll::Request(req)))
+                                        .await
+                                        .context("send request")?;
+                                } else {
+                                    continue;
+                                    // let's pretend we are done
+                                    // realistically, we should be seeding now
+                                    // set interested to false
+                                }
+                            }
+                            MessageAll::Cancel(request_piece_payload) => todo!(),
+                            MessageAll::KeepAlive(no_payload) => todo!(),
+                        }
+                    }
+                    Msg::Timeout => todo!(),
                 }
-                MessageAll::Cancel(request_piece_payload) => todo!(),
-                MessageAll::KeepAlive(no_payload) => todo!(),
             }
         }
     }
