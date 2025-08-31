@@ -1,4 +1,4 @@
-use futures_util::stream::unfold;
+use futures_util::stream::{SplitSink, unfold};
 use futures_util::{self, SinkExt, StreamExt};
 use std::net::SocketAddrV4;
 use tokio::sync::broadcast::{Receiver, Sender};
@@ -75,47 +75,34 @@ impl Peer {
         Ok(framed)
     }
 
+    async fn request_piece(
+        &mut self,
+        peer_writer: &mut SplitSink<MsgFrameType, Message>,
+        peer_data: &PeerData,
+    ) -> anyhow::Result<bool> {
+        let req = peer_data.prepare_next_req_send(&self.has);
+        if let Some(req) = req {
+            peer_writer
+                .send(Message::new(MessageAll::Request(req)))
+                .await
+                .context("send request")?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
     pub async fn event_loop(
         &mut self,
-        mut framed: MsgFrameType,
+        framed: MsgFrameType,
         peer_data: PeerData,
-        (tx, rx): (Sender<HavePayload>, Receiver<HavePayload>),
+        (broadcast_tx, broadcast_rx): (Sender<HavePayload>, Receiver<HavePayload>),
     ) -> anyhow::Result<()> {
         assert_eq!(self.state, PeerState::DataTransfer);
         // TODO: check if we are interested or not
         self.am_choking = false;
 
-        // TODO: check if downloading or uploading?
-        let bitfield: Message = framed
-            .next()
-            .await
-            .expect("peer should send bitfield")
-            .context("peer msg was invalid")?;
-        assert_eq!(bitfield.get_msg_type(), MessageType::Bitfield);
-        let MessageAll::Bitfield(bitfield) = bitfield.payload else {
-            unreachable!();
-        };
-        self.has = bitfield.pieces_available;
-
-        let Some(req) = peer_data.prepare_next_req_send(&self.has) else {
-            return Ok(());
-            todo!(); // sever connection
-        };
-
-        let interested_msg: Message = Message::new(MessageAll::Interested(NoPayload));
-        framed
-            .send(interested_msg)
-            .await
-            .context("write interested frame")?;
-
-        self.am_interested = true;
-
-        framed
-            .send(Message::new(MessageAll::Request(req)))
-            .await
-            .context("send request")?;
-
-        let (mut framed_tx, framed_rx) = framed.split();
+        let (mut peer_writer, framed_rx) = framed.split();
 
         let peer_msg_stream = unfold(framed_rx, |mut framed| async move {
             let Ok(Ok(message)) = framed.next().await.context("read message") else {
@@ -126,7 +113,7 @@ impl Peer {
         tokio::pin!(peer_msg_stream);
 
         // this is the stream sent by other connections to peers to send have messages
-        let have_stream = unfold(rx, |mut rx| async move {
+        let have_stream = unfold(broadcast_rx, |mut rx| async move {
             let Ok(have_payload) = rx.recv().await else {
                 return None;
             };
@@ -148,7 +135,7 @@ impl Peer {
                 match message {
                     Msg::HavePayload(have_payload) => {
                         dbg!(self.addr);
-                        framed_tx
+                        peer_writer
                             .send(Message::new(MessageAll::Have(dbg!(have_payload))))
                             .await
                             .context("send have")?;
@@ -162,20 +149,30 @@ impl Peer {
                             MessageAll::Unchoke(_no_payload) => self.peer_choking = false,
                             MessageAll::Interested(_no_payload) => self.peer_interested = true,
                             MessageAll::NotInterested(_no_payload) => self.peer_interested = false,
-                            MessageAll::Have(have_payload) => todo!(),
-                            MessageAll::Bitfield(bitfield_payload) => todo!(),
+                            MessageAll::Have(have_payload) => {
+                                self.has[have_payload.piece_index as usize] = true
+                            }
+                            MessageAll::Bitfield(bitfield_payload) => {
+                                self.has = bitfield_payload.pieces_available;
+                                // TODO: we're interested by default for now
+
+                                let interested_msg: Message =
+                                    Message::new(MessageAll::Interested(NoPayload));
+                                peer_writer
+                                    .send(interested_msg)
+                                    .await
+                                    .context("write interested frame")?;
+                                let _ = self.request_piece(&mut peer_writer, &peer_data).await?;
+
+                                self.am_interested = true;
+                            }
                             MessageAll::Request(request_piece_payload) => todo!(),
                             MessageAll::Piece(response_piece_payload) => {
                                 if let Some(index) = peer_data.add_block(response_piece_payload) {
                                     let have_payload = HavePayload { piece_index: index };
-                                    tx.send(have_payload).unwrap();
+                                    broadcast_tx.send(have_payload).unwrap();
                                 }
-                                if let Some(req) = peer_data.prepare_next_req_send(&self.has) {
-                                    framed_tx
-                                        .send(Message::new(MessageAll::Request(req)))
-                                        .await
-                                        .context("send request")?;
-                                } else {
+                                if !self.request_piece(&mut peer_writer, &peer_data).await? {
                                     continue;
                                     // let's pretend we are done
                                     // realistically, we should be seeding now
