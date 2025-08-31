@@ -166,7 +166,26 @@ impl Peer {
 
                                 self.am_interested = true;
                             }
-                            MessageAll::Request(request_piece_payload) => todo!(),
+                            MessageAll::Request(request_piece_payload) => {
+                                let block = peer_data.get_block(request_piece_payload);
+                                if let Some(block) = block {
+                                    let response_piece_payload = ResponsePiecePayload {
+                                        index: request_piece_payload.index,
+                                        begin: request_piece_payload.begin,
+                                        block,
+                                    };
+                                    peer_writer
+                                        .send(Message::new(MessageAll::Piece(
+                                            response_piece_payload,
+                                        )))
+                                        .await
+                                        .context("send response")?;
+                                } else {
+                                    // TODO: I'm not sure if we should send something if the peer sent us a request for
+                                    // either: a piece that we don't have
+                                    // or: just an invalid request
+                                }
+                            }
                             MessageAll::Piece(response_piece_payload) => {
                                 if let Some(index) = peer_data.add_block(response_piece_payload) {
                                     let have_payload = HavePayload { piece_index: index };

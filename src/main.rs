@@ -88,9 +88,9 @@ async fn main() -> anyhow::Result<()> {
             println!("Peer Id: {}", hex::encode(peer.peer_id));
         }
         DecodeMetadataType::DownloadPiece {
-            output,
-            torrent,
-            piece: piece_i,
+            output: _,
+            torrent: _,
+            piece: _piece_i,
         } => {
             // let torrent = read_torrent(torrent)?;
             // assert!(*piece_i < torrent.info.pieces.0.len() as u32); // piece starts at 0

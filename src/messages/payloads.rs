@@ -28,6 +28,7 @@ impl Payload for BitfieldPayload {
 
 #[derive(Debug, Clone, Copy, bincode::Encode, bincode::Decode)]
 pub struct RequestPiecePayload {
+    /// the index of the piece
     pub index: u32,
     pub begin: u32,
     pub length: u32,
