@@ -6,7 +6,8 @@ use serde_bencode;
 use std::net::SocketAddrV4;
 use std::path::PathBuf;
 
-const PEER_ID: &[u8; 20] = b"00112233445566778899";
+const PEER_ID: &[u8; 20] = b"-AZ2060-222222222222";
+const PEER_PORT: u16 = 6881;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -59,22 +60,38 @@ async fn main() -> anyhow::Result<()> {
         DecodeMetadataType::Info { torrent } => {
             let torrent = read_torrent(&torrent)?;
             println!("Tracker URL: {}", torrent.announce);
-            if let Key::SingleFile { length } = torrent.info.files {
-                println!("Length: {}", length);
-            }
+            println!("Length: {}", torrent.get_length());
             let info_hash = torrent.info_hash()?;
             println!("Info Hash: {}", hex::encode(info_hash));
             println!("Piece Length: {}", torrent.info.piece_length);
-            println!("Piece Hashes:",);
-            for hash in torrent.info.pieces.0.iter() {
-                println!("{}", hex::encode(hash));
-            }
+            // print everything except the piece hashes
+            println!("{:#?}", torrent.info.files);
+            println!("{:#?}", torrent.info.name);
+            println!("{:#?}", torrent.info.private);
+            dbg!(
+                serde_bencode::to_bytes(&torrent.info)
+                    .unwrap()
+                    .iter()
+                    .map(|b| {
+                        if b.is_ascii() {
+                            format!("{}", *b as char)
+                        } else {
+                            format!("{:x}", b)
+                        }
+                    })
+                    .collect::<Vec<String>>()
+                    .join("")
+            );
+            // println!("Piece Hashes:");
+            // for hash in torrent.info.pieces.0.iter() {
+            //     println!("{}", hex::encode(hash));
+            // }
         }
         DecodeMetadataType::Peers { torrent } => {
             let torrent = read_torrent(torrent)?;
-            let length = get_length(&torrent);
+            let length = torrent.get_length();
             let response = get_response(&torrent, length).await?;
-            for peer in response.peers {
+            for peer in response.peers.0 {
                 println!("{:?}", peer);
             }
         }
@@ -112,12 +129,11 @@ async fn main() -> anyhow::Result<()> {
             let info_hash = torrent.info_hash()?;
             let peer_data = PeerData::new(torrent, &[]);
             let (tx, rx) = tokio::sync::broadcast::channel(10);
-            for peer in response.peers.iter() {
-                let mut peer = Peer::new(*PEER_ID, peer.get_socket_addr());
-                let framed = peer
-                    .shake_hands_get_framed(info_hash)
-                    .await
-                    .context("shake hands")?;
+            for peer in response.peers.0.iter() {
+                let mut peer = Peer::new(*PEER_ID, *peer);
+                let Ok(framed) = peer.shake_hands_get_framed(info_hash).await else {
+                    continue;
+                };
 
                 let peer_data = peer_data.clone();
                 let rx = tx.subscribe();
@@ -143,24 +159,21 @@ fn read_torrent(torrent: &PathBuf) -> anyhow::Result<Torrent> {
     Ok(torrent)
 }
 
-fn get_length(torrent: &Torrent) -> u32 {
-    let Key::SingleFile { length } = torrent.info.files else {
-        todo!();
-    };
-    length
-}
-
 async fn get_response(torrent: &Torrent, length: u32) -> anyhow::Result<TrackerResponse> {
-    let request = TrackerRequest::new(torrent.info_hash()?, *PEER_ID, 6881, length);
+    let request = TrackerRequest::new(torrent.info_hash()?, *PEER_ID, PEER_PORT, length);
 
     let mut url = Url::parse(&torrent.announce).context("parse url")?;
     url.set_query(Some(&request.to_url_encoded()));
 
+    dbg!(hex::encode(&torrent.info_hash()?));
+    dbg!(&url.as_str());
     let response = reqwest::get(url).await.context("send request")?;
     let response_bytes = response
         .bytes()
         .await
         .context("get tracker response bytes")?;
+
+    dbg!(&response_bytes);
 
     serde_bencode::from_bytes::<TrackerResponse>(&response_bytes)
         .context("deserialize tracker response")

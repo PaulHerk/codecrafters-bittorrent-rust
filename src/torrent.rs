@@ -76,7 +76,7 @@ impl Torrent {
     }
 
     pub fn get_length(&self) -> u32 {
-        if let Key::SingleFile { length } = self.info.files {
+        if let Key::SingleFile { length, .. } = self.info.files {
             length
         } else {
             todo!()
@@ -93,6 +93,8 @@ pub struct Info {
     /// `piece length` maps to the number of bytes in each piece the file is split into.
     #[serde(rename = "piece length")]
     pub piece_length: u32,
+
+    pub private: Option<u8>,
     /// pieces is to be subdivided into strings of length 20,
     /// each of which is the SHA1 hash of the piece at the corresponding index.
     pub pieces: Hashes,
@@ -106,10 +108,14 @@ pub struct Info {
 #[serde(untagged)]
 pub enum Key {
     /// In the single file case, length maps to the length of the file in bytes.
-    SingleFile { length: u32 },
+    SingleFile { length: u32, md5sum: Option<String> },
     /// For the purposes of the other keys, the multi-file case is treated as only having
     /// a single file by concatenating the files in the order they appear in the files list.
-    MultiFile { files: Vec<File> },
+    MultiFile {
+        length: u32,
+        files: Vec<File>,
+        md5sum: Option<String>,
+    },
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct File {
