@@ -136,11 +136,11 @@ impl Peer {
             if let Some(message) = stream.next().await {
                 match message {
                     Msg::HavePayload(have_payload) => {
-                        dbg!(self.addr);
                         peer_writer
                             .send(Message::new(MessageAll::Have(have_payload)))
                             .await
                             .context("send have")?;
+                        eprintln!("sent have");
                     }
                     Msg::Data(message) => {
                         match message.payload {
@@ -183,6 +183,7 @@ impl Peer {
                                         .await
                                         .context("send response")?;
                                 } else {
+                                    println!("all done.")
                                     // TODO: I'm not sure if we should send something if the peer sent us a request for
                                     // either: a piece that we don't have
                                     // or: just an invalid request
