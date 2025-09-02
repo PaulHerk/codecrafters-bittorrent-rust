@@ -201,7 +201,7 @@ impl Peer {
                                     // set interested to false
                                 }
                             }
-                            MessageAll::Cancel(request_piece_payload) => todo!(),
+                            MessageAll::Cancel(_request_piece_payload) => todo!(), // only for extension, won't probably use it
                             MessageAll::KeepAlive(_no_payload) => eprintln!("he sent a keep alive"),
                         }
                     }
