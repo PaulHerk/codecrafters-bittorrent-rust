@@ -1,5 +1,3 @@
-use std::net::SocketAddrV4;
-
 use serde::{Deserialize, Serialize};
 
 use crate::tracker::peers::PeerConnections;

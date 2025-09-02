@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::Context;
 pub use hashes::Hashes;
 use serde::{Deserialize, Serialize};
@@ -70,13 +72,14 @@ pub struct Torrent {
 impl Torrent {
     pub fn info_hash(&self) -> Result<[u8; 20], anyhow::Error> {
         let mut hasher = Sha1::new();
-        hasher.update(serde_bencode::to_bytes(&self.info).context("re-encode info")?);
+        let bytes = serde_bencode::to_bytes(&self.info).context("re-encode info")?;
+        hasher.update(&bytes);
         let info_hash = hasher.finalize();
         info_hash.try_into().context("convert to [u8; 20]")
     }
 
     pub fn get_length(&self) -> u32 {
-        if let Key::SingleFile { length, .. } = self.info.files {
+        if let Some(length) = self.info.length {
             length
         } else {
             todo!()
@@ -93,26 +96,29 @@ pub struct Info {
     /// `piece length` maps to the number of bytes in each piece the file is split into.
     #[serde(rename = "piece length")]
     pub piece_length: u32,
-
-    pub private: Option<u8>,
     /// pieces is to be subdivided into strings of length 20,
     /// each of which is the SHA1 hash of the piece at the corresponding index.
     pub pieces: Hashes,
     /// If length is present then the download represents a single file,
     /// otherwise it represents a set of files which go in a directory structure.
+    length: Option<u32>,
     #[serde(flatten)]
     pub files: Key,
+    #[serde(flatten)]
+    pub other: HashMap<String, serde_bencode::value::Value>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum Key {
     /// In the single file case, length maps to the length of the file in bytes.
-    SingleFile { length: u32, md5sum: Option<String> },
+    SingleFile {
+        /* length: u32, */ md5sum: Option<String>,
+    },
     /// For the purposes of the other keys, the multi-file case is treated as only having
     /// a single file by concatenating the files in the order they appear in the files list.
     MultiFile {
-        length: u32,
+        // length: u32,
         files: Vec<File>,
         md5sum: Option<String>,
     },

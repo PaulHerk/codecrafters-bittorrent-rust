@@ -59,33 +59,15 @@ async fn main() -> anyhow::Result<()> {
         }
         DecodeMetadataType::Info { torrent } => {
             let torrent = read_torrent(&torrent)?;
-            println!("Tracker URL: {}", torrent.announce);
-            println!("Length: {}", torrent.get_length());
+            // println!("Tracker URL: {}", torrent.announce);
+            // println!("Length: {}", torrent.get_length());
             let info_hash = torrent.info_hash()?;
             println!("Info Hash: {}", hex::encode(info_hash));
             println!("Piece Length: {}", torrent.info.piece_length);
             // print everything except the piece hashes
             println!("{:#?}", torrent.info.files);
             println!("{:#?}", torrent.info.name);
-            println!("{:#?}", torrent.info.private);
-            dbg!(
-                serde_bencode::to_bytes(&torrent.info)
-                    .unwrap()
-                    .iter()
-                    .map(|b| {
-                        if b.is_ascii() {
-                            format!("{}", *b as char)
-                        } else {
-                            format!("{:x}", b)
-                        }
-                    })
-                    .collect::<Vec<String>>()
-                    .join("")
-            );
-            // println!("Piece Hashes:");
-            // for hash in torrent.info.pieces.0.iter() {
-            //     println!("{}", hex::encode(hash));
-            // }
+            println!("{:#?}", torrent.info.other);
         }
         DecodeMetadataType::Peers { torrent } => {
             let torrent = read_torrent(torrent)?;
@@ -156,6 +138,7 @@ async fn main() -> anyhow::Result<()> {
 fn read_torrent(torrent: &PathBuf) -> anyhow::Result<Torrent> {
     let bytes = std::fs::read(torrent).context("read torrent file")?;
     let torrent = serde_bencode::from_bytes::<Torrent>(&bytes).context("decode torrent")?;
+
     Ok(torrent)
 }
 
@@ -165,15 +148,11 @@ async fn get_response(torrent: &Torrent, length: u32) -> anyhow::Result<TrackerR
     let mut url = Url::parse(&torrent.announce).context("parse url")?;
     url.set_query(Some(&request.to_url_encoded()));
 
-    dbg!(hex::encode(&torrent.info_hash()?));
-    dbg!(&url.as_str());
     let response = reqwest::get(url).await.context("send request")?;
     let response_bytes = response
         .bytes()
         .await
         .context("get tracker response bytes")?;
-
-    dbg!(&response_bytes);
 
     serde_bencode::from_bytes::<TrackerResponse>(&response_bytes)
         .context("deserialize tracker response")
