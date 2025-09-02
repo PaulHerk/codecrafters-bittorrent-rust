@@ -1,3 +1,5 @@
+use std::io::Read;
+
 use bytes::BufMut;
 use bytes::{Buf, BytesMut};
 use serde_repr::Deserialize_repr;
@@ -69,18 +71,19 @@ impl Message {
             payload,
         }
     }
-    pub fn get_msg_type(&self) -> MessageType {
+    /// returns None if it's a keep alive message
+    pub fn get_msg_type(&self) -> Option<MessageType> {
         match self.payload {
-            MessageAll::Choke(_) => MessageType::Choke,
-            MessageAll::Unchoke(_) => MessageType::Unchoke,
-            MessageAll::Interested(_) => MessageType::Interested,
-            MessageAll::NotInterested(_) => MessageType::NotInterested,
-            MessageAll::Have(_) => MessageType::Have,
-            MessageAll::Bitfield(_) => MessageType::Bitfield,
-            MessageAll::Request(_) => MessageType::Request,
-            MessageAll::Piece(_) => MessageType::Piece,
-            MessageAll::Cancel(_) => MessageType::Cancel,
-            MessageAll::KeepAlive(_) => unreachable!(),
+            MessageAll::Choke(_) => Some(MessageType::Choke),
+            MessageAll::Unchoke(_) => Some(MessageType::Unchoke),
+            MessageAll::Interested(_) => Some(MessageType::Interested),
+            MessageAll::NotInterested(_) => Some(MessageType::NotInterested),
+            MessageAll::Have(_) => Some(MessageType::Have),
+            MessageAll::Bitfield(_) => Some(MessageType::Bitfield),
+            MessageAll::Request(_) => Some(MessageType::Request),
+            MessageAll::Piece(_) => Some(MessageType::Piece),
+            MessageAll::Cancel(_) => Some(MessageType::Cancel),
+            MessageAll::KeepAlive(_) => None,
         }
     }
 }
@@ -102,9 +105,10 @@ impl Decoder for MessageFramer {
         // Read length marker.
         let mut length_bytes = [0u8; 4];
         length_bytes.copy_from_slice(&src[..4]);
-        let length = u32::from_be_bytes(length_bytes);
+        // length without the length prefix
+        let data_length = u32::from_be_bytes(length_bytes);
 
-        if length == 0 {
+        if data_length == 0 {
             // this is a keep alive message
             // discard it
             src.advance(4);
@@ -121,36 +125,36 @@ impl Decoder for MessageFramer {
 
         // Check that the length is not too large to avoid a denial of
         // service attack where the server runs out of memory.
-        if length > MAX {
+        if data_length > MAX {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("Frame of length {} is too large.", length),
+                format!("Frame of length {} is too large.", data_length),
             ));
         }
 
-        if (src.len() as u32) < 4 + length {
+        if (src.len() as u32) < 4 + data_length {
             // The full string has not yet arrived.
             //
             // We reserve more space in the buffer. This is not strictly
             // necessary, but is a good idea performance-wise.
-            src.reserve(4 + length as usize - src.len());
+            src.reserve(4 + data_length as usize - src.len());
 
             // We inform the Framed that we need more bytes to form the next
             // frame.
             return Ok(None);
         }
 
-        let data = if length > 1 {
-            src[5..4 + length as usize].to_vec()
+        let data = if data_length > 1 {
+            src[5..4 + data_length as usize].to_vec()
         } else {
             vec![]
         };
         let data = data.as_slice();
         let msg_type = src[4];
-        src.advance(4 + length as usize);
+        src.advance(4 + data_length as usize);
 
         let payload = match serde_json::from_str::<MessageType>(&msg_type.to_string()) {
-            Ok(MessageType::Choke) => Ok(MessageAll::Choke(NoPayload)),
+            Ok(MessageType::Choke) => Ok::<_, std::io::Error>(MessageAll::Choke(NoPayload)),
             Ok(MessageType::Unchoke) => Ok(MessageAll::Unchoke(NoPayload)),
             Ok(MessageType::Interested) => Ok(MessageAll::Interested(NoPayload)),
             Ok(MessageType::NotInterested) => Ok(MessageAll::NotInterested(NoPayload)),
@@ -168,13 +172,19 @@ impl Decoder for MessageFramer {
             Ok(MessageType::Cancel) => {
                 Ok(MessageAll::Cancel(RequestPiecePayload::from_be_bytes(data)))
             }
-            _ => Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Invalid message type: {:?}", src[4]),
-            )),
+            _ => {
+                // now theoretically we would panic here or some sort.
+                // however there are extensions with make use of different message types.
+                // we will ignore them tho
+                // Err(std::io::Error::new(
+                //     std::io::ErrorKind::InvalidData,
+                //     format!("Invalid message type: {:?}", src[4]),
+                // ))
+                return Ok(None);
+            }
         };
         Ok(Some(Message {
-            length,
+            length: data_length,
             payload: payload?,
         }))
     }
@@ -193,12 +203,17 @@ impl Encoder<Message> for MessageFramer {
             ));
         }
 
+        let Some(msg_type) = item.get_msg_type() else {
+            // it's a keep alive message
+            return Ok(());
+        };
+
         // Reserve space in the buffer.
         dst.reserve(item.length as usize);
 
         // Write the length and string to the buffer.
         dst.extend_from_slice(&item.length.to_be_bytes());
-        dst.put_u8(item.get_msg_type() as u8);
+        dst.put_u8(msg_type as u8);
         dst.extend_from_slice(item.payload.to_be_bytes().as_slice());
         Ok(())
     }

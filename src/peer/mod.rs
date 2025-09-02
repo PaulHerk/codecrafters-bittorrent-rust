@@ -27,6 +27,7 @@ pub struct Peer {
 }
 
 /// this enum is used to select between different stream-types
+#[derive(Debug)]
 enum Msg {
     /// this is sent by other peers in order for this particular peer to announce that it has the piece
     HavePayload(HavePayload),
@@ -62,7 +63,7 @@ impl Peer {
         let handshake_recv = handshake_to_send
             .shake_hands(&mut tcp)
             .await
-            .expect("peer should send handshake");
+            .context("peer should send handshake")?;
 
         assert_eq!(handshake_recv.info_hash, info_hash); // TODO: sever connection
         // assert_eq!(handshake_recv.peer_id, self.peer_id);
@@ -121,7 +122,8 @@ impl Peer {
         });
         tokio::pin!(have_stream);
 
-        let timeout = tokio::time::interval(std::time::Duration::from_secs(120));
+        let duration = std::time::Duration::from_secs(120);
+        let timeout = tokio::time::interval_at(tokio::time::Instant::now() + duration, duration);
         let timeout_stream = unfold(timeout, |mut timeout| async move {
             timeout.tick().await;
             Some((Msg::Timeout, timeout))
@@ -136,7 +138,7 @@ impl Peer {
                     Msg::HavePayload(have_payload) => {
                         dbg!(self.addr);
                         peer_writer
-                            .send(Message::new(MessageAll::Have(dbg!(have_payload))))
+                            .send(Message::new(MessageAll::Have(have_payload)))
                             .await
                             .context("send have")?;
                     }
@@ -199,10 +201,14 @@ impl Peer {
                                 }
                             }
                             MessageAll::Cancel(request_piece_payload) => todo!(),
-                            MessageAll::KeepAlive(no_payload) => todo!(),
+                            MessageAll::KeepAlive(_no_payload) => eprintln!("he sent a keep alive"),
                         }
                     }
-                    Msg::Timeout => todo!(),
+                    Msg::Timeout => {
+                        peer_writer
+                            .send(Message::new(MessageAll::KeepAlive(NoPayload)))
+                            .await?
+                    }
                 }
             }
         }
