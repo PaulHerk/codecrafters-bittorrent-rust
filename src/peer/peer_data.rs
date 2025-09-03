@@ -51,12 +51,15 @@ impl PeerData {
 
         let mut pieces: Vec<Vec<Vec<u8>>> = Vec::with_capacity(torrent.info.pieces.0.len());
         let mut have = Vec::with_capacity(torrent.info.pieces.0.len());
+
+        // TODO: store a bitfield in memory
         let mut current_piece = None;
 
         // what this loop does:
         // 1. put the bytes into the pieces Vec
         // 2. allocate the exact space needed if the bytes are yet to be recieved
         // 3. initialize the have Vec
+        // TODO: the last 2 steps are absolutely not necessarily. We should just store a bitfield in memory
         for piece_i in 0..torrent.info.pieces.0.len() as u32 {
             let piece_size = if piece_i == torrent.info.pieces.0.len() as u32 - 1
                 && length % torrent.info.piece_length != 0
@@ -75,8 +78,6 @@ impl PeerData {
                 nblocks as usize
             ]));
 
-            let current_have = have.get_mut(piece_i as usize).expect("we just pushed it");
-
             for block_i in 0..nblocks {
                 let block_length = if block_i == nblocks - 1 && piece_size % BLOCK_MAX != 0 {
                     piece_size % BLOCK_MAX
@@ -84,23 +85,11 @@ impl PeerData {
                     BLOCK_MAX
                 };
 
-                let range =
-                    (block_i * BLOCK_MAX) as usize..(block_i * BLOCK_MAX + block_length) as usize;
-
                 pieces[piece_i as usize].push(Vec::with_capacity(block_length as usize));
-                if let Some(block) = bytes.get(range) {
-                    pieces[piece_i as usize][block_i as usize].copy_from_slice(block);
-                    let PieceState::Incomplete(blocks) = current_have else {
-                        unreachable!()
-                    };
-                    blocks[block_i as usize] = BlockState::Complete;
-                }
-                if current_have.is_complete() {
-                    *current_have = PieceState::Complete;
-                } else {
-                    current_piece = Some(piece_i);
-                }
             }
+            // TODO: it should now check a bitfield vec in memory to see if we have the block
+            // and if we do, update have
+            let _current_have = have.get_mut(piece_i as usize).expect("we just pushed it");
         }
 
         Self {
