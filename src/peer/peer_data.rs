@@ -18,6 +18,7 @@ pub struct PeerData {
     /// each piece is a Vec of blocks
     /// each block is a Vec of bytes
     pieces: Arc<Mutex<Vec<Vec<Vec<u8>>>>>,
+    // TODO: have: Arc<Mutex<Vec<bool>>>,
     have: Arc<Mutex<Vec<PieceState>>>,
     /// it's None if we're seeding
     current_piece: Arc<Mutex<Option<u32>>>,

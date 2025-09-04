@@ -1,3 +1,4 @@
+pub mod database;
 pub mod messages;
 pub mod peer;
 pub mod torrent;
@@ -5,6 +6,7 @@ pub mod tracker;
 
 use std::collections::HashMap;
 
+pub use database::*;
 pub use messages::payloads::*;
 pub use messages::*;
 pub use peer::handshake::*;

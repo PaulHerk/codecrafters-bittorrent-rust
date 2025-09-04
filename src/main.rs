@@ -91,6 +91,16 @@ async fn main() -> anyhow::Result<()> {
             torrent: _,
             piece: _piece_i,
         } => {
+            let file = DBFile {
+                file_path: PathBuf::from("test.txt"),
+                torrent_path: PathBuf::from("test.torrent"),
+                info_hash: [0; 20],
+            };
+            let db = DBConnection::new().await?;
+            let file_info = db
+                .set_and_get_file(file)
+                .await
+                .context("set and get file")?;
             // let torrent = read_torrent(torrent)?;
             // assert!(*piece_i < torrent.info.pieces.0.len() as u32); // piece starts at 0
             // let all_blocks = download_piece(&torrent, *piece_i).await?;
