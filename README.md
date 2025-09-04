@@ -1,35 +1,46 @@
-[![progress-banner](https://backend.codecrafters.io/progress/bittorrent/ca031b0b-17ef-4eb5-b039-cbcd15060d85)](https://app.codecrafters.io/users/codecrafters-bot?r=2qF)
+This project started out on codecrafters: [link to the challenge](https://app.codecrafters.io/courses/bittorrent/introduction)
 
-This is a starting point for Rust solutions to the
-["Build Your Own BitTorrent" Challenge](https://app.codecrafters.io/courses/bittorrent/overview).
+# a BitTorrent implementation in Rust
+I somehow found pretty big interest in peer-to-peer communication. I found a challenge where you implement BitTorrent by yourself from scratch on a pretty cool coding website (see above). Now I completed the main part (it's only partial on their website) and want to implement the rest of the [protocol](https://bittorrent.org/beps/bep_0003.html) (no extensions).
 
-In this challenge, you’ll build a BitTorrent client that's capable of parsing a
-.torrent file and downloading a file from a peer. Along the way, we’ll learn
-about how torrent files are structured, HTTP trackers, BitTorrent’s Peer
-Protocol, pipelining and more.
+## features (done / want to add)
+- [x] downloading a file from the peers of the tracker found in the .torrent file
+- [ ] seeding a file
+- [ ] storing the state of a file to disk so that you can stop a download and continue later
+- [ ] retrying if none of the peers seed (currently it just iters through the peer-list once and if no one's there, no file for you)
+- [ ] choking algorithm??? (probably not though)
+- [ ] CLI
 
-**Note**: If you're viewing this repo on GitHub, head over to
-[codecrafters.io](https://codecrafters.io) to try the challenge.
+## current CLI usage
+"current" because I will probably change some of it since the CLI commands were from the original challenge and are more of a sort of guidance.
 
-# Passing the first stage
+```
+Commands:
+  decode
+  info
+  peers
+  handshake
+  download_piece
+  download
+  help            Print this message or the help of the given subcommand(s)
 
-The entry point for your BitTorrent implementation is in `src/main.rs`. Study
-and uncomment the relevant code, and push your changes to pass the first stage:
-
-```sh
-git commit -am "pass 1st stage" # any msg
-git push origin master
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
 ```
 
-Time to move on to the next stage!
+Now you'll probably want to use the "download" command which looks like that:
+```
+Usage: codecrafters-bittorrent download [OPTIONS] <TORRENT>
 
-# Stage 2 & beyond
+Arguments:
+  <TORRENT>
 
-Note: This section is for stages 2 and beyond.
+Options:
+  -o <OUTPUT>
+  -h, --help       Print help
+```
+If no output is provided, it will use the name found in the .torrent file.
 
-1. Ensure you have `cargo (1.87)` installed locally
-1. Run `./your_program.sh` to run your program, which is implemented in
-   `src/main.rs`. This command compiles your Rust project, so it might be slow
-   the first time you run it. Subsequent runs will be fast.
-1. Commit your changes and run `git push origin master` to submit your solution
-   to CodeCrafters. Test output will be streamed to your terminal.
+### example
+`codecrafters-bittorrent download sample.torrent -o test.txt`
