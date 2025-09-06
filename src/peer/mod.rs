@@ -11,7 +11,7 @@ use crate::states::PeerState;
 use crate::{messages::*, *};
 
 pub mod handshake;
-pub mod peer_data;
+// pub mod peer_data;
 pub mod states;
 
 #[derive(Debug, Clone)]
@@ -23,6 +23,7 @@ pub struct Peer {
     pub am_interested: bool,
     pub peer_choking: bool,
     pub peer_interested: bool,
+    /// the bitfield of the other peer
     pub has: Vec<bool>,
 }
 
@@ -79,9 +80,9 @@ impl Peer {
     async fn request_piece(
         &mut self,
         peer_writer: &mut SplitSink<MsgFrameType, Message>,
-        peer_data: &PeerData,
+        file_loader: &FileLoader,
     ) -> anyhow::Result<bool> {
-        let req = peer_data.prepare_next_req_send(&self.has);
+        let req = file_loader.prepare_next_req_send(&self.has);
         if let Some(req) = req {
             peer_writer
                 .send(Message::new(MessageAll::Request(req)))
@@ -96,8 +97,10 @@ impl Peer {
     pub async fn event_loop(
         &mut self,
         framed: MsgFrameType,
-        peer_data: PeerData,
-        (broadcast_tx, broadcast_rx): (Sender<HavePayload>, Receiver<HavePayload>),
+        data_sender: tokio::sync::mpsc::Sender<ResponsePiecePayload>,
+        file_loader: FileLoader,
+        // used for sending have messages to the peer
+        has_receiver: tokio::sync::broadcast::Receiver<HavePayload>,
     ) -> anyhow::Result<()> {
         assert_eq!(self.state, PeerState::DataTransfer);
         // TODO: check if we are interested or not
@@ -114,7 +117,7 @@ impl Peer {
         tokio::pin!(peer_msg_stream);
 
         // this is the stream sent by other connections to peers to send have messages
-        let have_stream = unfold(broadcast_rx, |mut rx| async move {
+        let have_stream = unfold(has_receiver, |mut rx| async move {
             let Ok(have_payload) = rx.recv().await else {
                 return None;
             };
@@ -164,12 +167,12 @@ impl Peer {
                                     .send(interested_msg)
                                     .await
                                     .context("write interested frame")?;
-                                let _ = self.request_piece(&mut peer_writer, &peer_data).await?;
+                                let _ = self.request_piece(&mut peer_writer, &file_loader).await?;
 
                                 self.am_interested = true;
                             }
                             MessageAll::Request(request_piece_payload) => {
-                                let block = peer_data.get_block(request_piece_payload);
+                                let block = file_loader.get_block(request_piece_payload);
                                 if let Some(block) = block {
                                     let response_piece_payload = ResponsePiecePayload {
                                         index: request_piece_payload.index,
@@ -190,11 +193,9 @@ impl Peer {
                                 }
                             }
                             MessageAll::Piece(response_piece_payload) => {
-                                if let Some(index) = peer_data.add_block(response_piece_payload) {
-                                    let have_payload = HavePayload { piece_index: index };
-                                    broadcast_tx.send(have_payload).unwrap();
-                                }
-                                if !self.request_piece(&mut peer_writer, &peer_data).await? {
+                                data_sender.send(response_piece_payload).await?;
+
+                                if !self.request_piece(&mut peer_writer, &file_loader).await? {
                                     continue;
                                     // let's pretend we are done
                                     // realistically, we should be seeding now

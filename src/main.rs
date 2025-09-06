@@ -92,15 +92,36 @@ async fn main() -> anyhow::Result<()> {
             piece: _piece_i,
         } => {
             let file = DBFile {
-                file_path: PathBuf::from("test.txt"),
-                torrent_path: PathBuf::from("test.torrent"),
-                info_hash: [0; 20],
+                file_path: PathBuf::from("./test.txt"),
+                torrent_path: PathBuf::from("./sample.torrent"),
             };
-            let db = DBConnection::new().await?;
-            let file_info = db
-                .set_and_get_file(file)
-                .await
-                .context("set and get file")?;
+            let (data_tx, data_rx) = tokio::sync::mpsc::channel::<ResponsePiecePayload>(32);
+            let (has_tx, _has_rx) = tokio::sync::broadcast::channel(32);
+
+            let file_loader = FileLoader::from_db_file(file).await?;
+            let response =
+                get_response(&file_loader.torrent, file_loader.torrent.get_length()).await?;
+            let info_hash = file_loader.torrent.info_hash()?;
+
+            for peer in response.peers.0.iter() {
+                let mut peer = Peer::new(*PEER_ID, *peer);
+                let Ok(framed) = peer.shake_hands_get_framed(info_hash).await else {
+                    continue;
+                };
+
+                let file_loader = file_loader.clone();
+                let tx = data_tx.clone();
+                let has_rx = has_tx.subscribe();
+                tokio::spawn(async move {
+                    peer.event_loop(framed, tx, file_loader, has_rx)
+                        .await
+                        .unwrap();
+                });
+            }
+
+            tokio::spawn(async move {
+                file_loader.write_file(data_rx).await.unwrap();
+            });
             // let torrent = read_torrent(torrent)?;
             // assert!(*piece_i < torrent.info.pieces.0.len() as u32); // piece starts at 0
             // let all_blocks = download_piece(&torrent, *piece_i).await?;
@@ -109,43 +130,43 @@ async fn main() -> anyhow::Result<()> {
             // file.write_all(&all_blocks)
             //     .context("write downloaded file")?;
         }
-        DecodeMetadataType::Download { output, torrent } => {
-            let torrent = read_torrent(torrent)?;
-            let output = match output {
-                Some(output) => output,
-                None => &PathBuf::from(&torrent.info.name),
-            };
-            let length = torrent.get_length();
-            let response = get_response(&torrent, length).await?;
+        _ => {} // DecodeMetadataType::Download { output, torrent } => {
+                //     let torrent = read_torrent(torrent)?;
+                //     let output = match output {
+                //         Some(output) => output,
+                //         None => &PathBuf::from(&torrent.info.name),
+                //     };
+                //     let length = torrent.get_length();
+                //     let response = get_response(&torrent, length).await?;
 
-            let info_hash = torrent.info_hash()?;
-            let peer_data = PeerData::new(torrent, &[]);
-            let (tx, rx) = tokio::sync::broadcast::channel(10);
-            for peer in response.peers.0.iter() {
-                let mut peer = Peer::new(*PEER_ID, *peer);
-                let Ok(framed) = peer.shake_hands_get_framed(info_hash).await else {
-                    continue;
-                };
+                //     let info_hash = torrent.info_hash()?;
+                //     let peer_data = PeerData::new(torrent, &[]);
+                //     let (tx, rx) = tokio::sync::broadcast::channel(10);
+                //     for peer in response.peers.0.iter() {
+                //         let mut peer = Peer::new(*PEER_ID, *peer);
+                //         let Ok(framed) = peer.shake_hands_get_framed(info_hash).await else {
+                //             continue;
+                //         };
 
-                let peer_data = peer_data.clone();
-                let rx = tx.subscribe();
-                let tx = tx.clone();
-                tokio::spawn(async move {
-                    peer.event_loop(framed, peer_data, (tx, rx)).await.unwrap();
-                });
-            }
+                //         let peer_data = peer_data.clone();
+                //         let rx = tx.subscribe();
+                //         let tx = tx.clone();
+                //         tokio::spawn(async move {
+                //             // peer.event_loop(framed, peer_data, (tx, rx)).await.unwrap();
+                //         });
+                //     }
 
-            let file = std::fs::File::create(output).context("create downloaded file")?;
-            peer_data.write_file(file, rx).await.context("write file")?;
+                //     let file = std::fs::File::create(output).context("create downloaded file")?;
+                //     peer_data.write_file(file, rx).await.context("write file")?;
 
-            loop {}
-        }
+                //     loop {}
+                // }
     }
 
     Ok(())
 }
 
-fn read_torrent(torrent: &PathBuf) -> anyhow::Result<Torrent> {
+pub fn read_torrent(torrent: &PathBuf) -> anyhow::Result<Torrent> {
     let bytes = std::fs::read(torrent).context("read torrent file")?;
     let torrent = serde_bencode::from_bytes::<Torrent>(&bytes).context("decode torrent")?;
 

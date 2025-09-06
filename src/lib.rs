@@ -10,7 +10,7 @@ pub use database::*;
 pub use messages::payloads::*;
 pub use messages::*;
 pub use peer::handshake::*;
-pub use peer::peer_data::*;
+// pub use peer::peer_data::*;
 pub use peer::states::*;
 pub use peer::*;
 use tokio::net::TcpStream;
