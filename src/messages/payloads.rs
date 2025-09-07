@@ -13,7 +13,7 @@ impl Payload for BitfieldPayload {
         let mut pieces_available = vec![false; payload.len() * 8];
         for (byte_i, byte) in payload.iter().enumerate() {
             let mut i = 0_u8;
-            while byte << i != 0 && i < 8 {
+            while i < 8 && byte << i != 0 {
                 pieces_available[byte_i * 8 + i as usize] = true;
                 i += 1;
             }

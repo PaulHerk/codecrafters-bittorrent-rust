@@ -68,7 +68,7 @@ pub struct FileLoader {
     file: Arc<Mutex<File>>,
     /// the info_hash is hex encoded here
     info_hash: [char; 40],
-    /// None if we're finished downloading
+    /// None if we're finished downloading, TODO: I might not event need the Option?
     download_state: Arc<Mutex<Option<DownloadState>>>,
     // TODO: db_conn: Arc<Surreal<Db>> ??
     db_conn: Arc<Surreal<Db>>,
@@ -145,6 +145,12 @@ impl FileLoader {
         })
     }
 
+    /// returns true if the download is finished
+    pub fn is_finished(&self) -> bool {
+        self.download_state.lock().unwrap().is_none()
+            || self.file_info.lock().unwrap().bitfield.iter().all(|b| *b)
+    }
+
     fn get_piece(&self, piece_i: u32) -> Result<(), io::Error> {
         let piece_len = self.torrent.info.piece_length;
         let file = &mut self.file.lock().unwrap();
@@ -199,7 +205,6 @@ impl FileLoader {
     // this function writes the piece to the file and updates the bitfield in Self and the DB
     pub(super) async fn write_piece(&self, payload: ResponsePiecePayload) -> anyhow::Result<()> {
         let new_bitfield: Cow<'static, [bool]> = {
-            println!("waiting on block lock");
             let Some(ref mut state) = *self.download_state.lock().unwrap() else {
                 // we should not be here
                 // however if we do, should already be done with the download
@@ -336,7 +341,6 @@ impl DBConnection {
                         .0
                         .select((thing.tb.as_str(), thing.id.to_raw()))
                         .await?;
-                    dbg!(&record);
                     Ok(record.expect("It must exist since we just checked that it exists"))
                 } else {
                     Err(e)

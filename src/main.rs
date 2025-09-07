@@ -98,11 +98,15 @@ async fn main() -> anyhow::Result<()> {
             let (has_tx, _has_rx) = tokio::sync::broadcast::channel(32);
 
             let file_loader = FileLoader::from_db_file(file).await?;
+            if file_loader.is_finished() {
+                println!("finished");
+                return Ok(());
+            }
             let response =
                 get_response(&file_loader.torrent, file_loader.torrent.get_length()).await?;
             let info_hash = file_loader.torrent.info_hash()?;
 
-            for peer in response.peers.0.iter().take(1) {
+            for peer in response.peers.0.iter() {
                 let mut peer = Peer::new(*PEER_ID, *peer);
                 let Ok(framed) = peer.shake_hands_get_framed(info_hash).await else {
                     continue;

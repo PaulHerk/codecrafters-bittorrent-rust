@@ -82,7 +82,6 @@ impl Peer {
         file_loader: &FileLoader,
     ) -> anyhow::Result<bool> {
         let req = file_loader.prepare_next_req_send(&self.has);
-        dbg!(&req);
         if let Some(req) = req {
             peer_writer
                 .send(Message::new(MessageAll::Request(req)))
@@ -108,7 +107,6 @@ impl Peer {
         let (mut peer_writer, framed_rx) = framed.split();
 
         let peer_msg_stream = unfold(framed_rx, |mut framed| async move {
-            println!("peer_msg_stream");
             let Ok(Ok(message)) = framed.next().await.context("read message") else {
                 return None;
             };
@@ -118,7 +116,6 @@ impl Peer {
 
         // this is the stream sent by other connections to peers to send have messages
         let have_stream = unfold(has_receiver, |mut rx| async move {
-            println!("have_stream");
             let Ok(have_payload) = rx.recv().await else {
                 return None;
             };
@@ -129,7 +126,6 @@ impl Peer {
         let duration = std::time::Duration::from_secs(120);
         let timeout = tokio::time::interval_at(tokio::time::Instant::now() + duration, duration);
         let timeout_stream = unfold(timeout, |mut timeout| async move {
-            println!("timeout_stream");
             timeout.tick().await;
             Some((Msg::Timeout, timeout))
         });
@@ -165,7 +161,6 @@ impl Peer {
 
                                 let interested_msg: Message =
                                     Message::new(MessageAll::Interested(NoPayload));
-                                dbg!(&interested_msg);
                                 peer_writer
                                     .send(interested_msg)
                                     .await
