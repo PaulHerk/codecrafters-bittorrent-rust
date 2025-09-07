@@ -126,7 +126,7 @@ impl Decoder for MessageFramer {
         if data_length > MAX {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("Frame of length {} is too large.", data_length),
+                format!("Frame of length {data_length} is too large"),
             ));
         }
 

@@ -2,7 +2,6 @@ use anyhow::Context;
 use clap::{Parser, Subcommand};
 use codecrafters_bittorrent::*;
 use reqwest::Url;
-use serde_bencode;
 use std::net::SocketAddrV4;
 use std::path::PathBuf;
 
@@ -55,7 +54,7 @@ async fn main() -> anyhow::Result<()> {
         DecodeMetadataType::Decode { value } => {
             let decoded_value: serde_bencode::value::Value =
                 serde_bencode::from_str(value).context("decode bencode")?;
-            println!("{:?}", decoded_value);
+            println!("{decoded_value:?}");
         }
         DecodeMetadataType::Info { torrent } => {
             let torrent = read_torrent(torrent)?;
@@ -74,7 +73,7 @@ async fn main() -> anyhow::Result<()> {
             let length = torrent.get_length();
             let response = get_response(&torrent, length).await?;
             for peer in response.peers.0 {
-                println!("{:?}", peer);
+                println!("{peer:?}");
             }
         }
         DecodeMetadataType::Handshake { torrent, addr } => {

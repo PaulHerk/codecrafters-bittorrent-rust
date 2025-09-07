@@ -1,7 +1,6 @@
 use std::borrow::Cow;
 use std::fs::File;
 use std::fs::OpenOptions;
-use std::io;
 use std::os::unix::fs::FileExt;
 use std::path::Path;
 use std::path::PathBuf;
@@ -151,15 +150,16 @@ impl FileLoader {
             || self.file_info.lock().unwrap().bitfield.iter().all(|b| *b)
     }
 
-    fn get_piece(&self, piece_i: u32) -> Result<(), io::Error> {
-        let piece_len = self.torrent.info.piece_length;
-        let file = &mut self.file.lock().unwrap();
-        let mut piece_buf = BytesMut::with_capacity(piece_len as usize);
-        file.read_exact_at(&mut piece_buf, piece_i as u64 * piece_len as u64)
-    }
-
     pub fn get_block(&self, req_payload: RequestPiecePayload) -> Option<Vec<u8>> {
-        todo!()
+        let mut buf = BytesMut::with_capacity(req_payload.length as usize);
+        let offset = req_payload.index as u64 * self.torrent.info.piece_length as u64
+            + req_payload.begin as u64;
+        self.file
+            .lock()
+            .unwrap()
+            .read_exact_at(&mut buf, offset)
+            .ok()?;
+        Some(buf.to_vec())
     }
 
     /// returns the next piece and block begin that we need to request
@@ -173,7 +173,7 @@ impl FileLoader {
 
         // if I already have the piece choose the next one
         if i_have[download_state.piece_i as usize] {
-            *download_state = self.get_next_download_state(peer_has, &i_have)?;
+            *download_state = self.get_next_download_state(peer_has, i_have)?;
         }
 
         //
@@ -188,14 +188,13 @@ impl FileLoader {
             download_state.piece_i,
             download_state.block_i * BLOCK_MAX,
             block_length,
-        )
-        .clone();
+        );
 
         // increment download_state if it's not the last one, otherwise calculate the next piece again
         // note: block_i starts at 0 and nblocks is a len but block_i is the index
         // of the block we want to write next and not the index of the block we return to write to
         if download_state.block_i == nblocks {
-            *download_state = self.get_next_download_state(peer_has, &i_have)?;
+            *download_state = self.get_next_download_state(peer_has, i_have)?;
         } else {
             download_state.block_i += 1;
         }
