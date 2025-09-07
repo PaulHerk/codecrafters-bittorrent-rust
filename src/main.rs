@@ -58,7 +58,7 @@ async fn main() -> anyhow::Result<()> {
             println!("{:?}", decoded_value);
         }
         DecodeMetadataType::Info { torrent } => {
-            let torrent = read_torrent(&torrent)?;
+            let torrent = read_torrent(torrent)?;
             // println!("Tracker URL: {}", torrent.announce);
             // println!("Length: {}", torrent.get_length());
             let info_hash = torrent.info_hash()?;
@@ -95,7 +95,6 @@ async fn main() -> anyhow::Result<()> {
                 file_path: PathBuf::from("./test.txt"),
                 torrent_path: PathBuf::from("./sample.torrent"),
             };
-            let (data_tx, data_rx) = tokio::sync::mpsc::channel::<ResponsePiecePayload>(32);
             let (has_tx, _has_rx) = tokio::sync::broadcast::channel(32);
 
             let file_loader = FileLoader::from_db_file(file).await?;
@@ -103,25 +102,20 @@ async fn main() -> anyhow::Result<()> {
                 get_response(&file_loader.torrent, file_loader.torrent.get_length()).await?;
             let info_hash = file_loader.torrent.info_hash()?;
 
-            for peer in response.peers.0.iter() {
+            for peer in response.peers.0.iter().take(1) {
                 let mut peer = Peer::new(*PEER_ID, *peer);
                 let Ok(framed) = peer.shake_hands_get_framed(info_hash).await else {
                     continue;
                 };
 
                 let file_loader = file_loader.clone();
-                let tx = data_tx.clone();
                 let has_rx = has_tx.subscribe();
                 tokio::spawn(async move {
-                    peer.event_loop(framed, tx, file_loader, has_rx)
-                        .await
-                        .unwrap();
+                    let _ = peer.event_loop(framed, file_loader, has_rx).await;
                 });
             }
 
-            tokio::spawn(async move {
-                file_loader.write_file(data_rx).await.unwrap();
-            });
+            std::thread::sleep(std::time::Duration::MAX);
             // let torrent = read_torrent(torrent)?;
             // assert!(*piece_i < torrent.info.pieces.0.len() as u32); // piece starts at 0
             // let all_blocks = download_piece(&torrent, *piece_i).await?;

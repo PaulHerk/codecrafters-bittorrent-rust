@@ -75,7 +75,7 @@ impl Torrent {
         let bytes = serde_bencode::to_bytes(&self.info).context("re-encode info")?;
         hasher.update(&bytes);
         let info_hash = hasher.finalize();
-        info_hash.try_into().context("convert to [u8; 20]")
+        Ok(info_hash.into())
     }
 
     pub fn get_length(&self) -> u32 {

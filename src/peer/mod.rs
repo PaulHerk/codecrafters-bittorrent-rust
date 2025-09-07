@@ -1,7 +1,6 @@
 use futures_util::stream::{SplitSink, unfold};
 use futures_util::{self, SinkExt, StreamExt};
 use std::net::SocketAddrV4;
-use tokio::sync::broadcast::{Receiver, Sender};
 use tokio_util::codec::Framed;
 
 use anyhow::Context;
@@ -83,6 +82,7 @@ impl Peer {
         file_loader: &FileLoader,
     ) -> anyhow::Result<bool> {
         let req = file_loader.prepare_next_req_send(&self.has);
+        dbg!(&req);
         if let Some(req) = req {
             peer_writer
                 .send(Message::new(MessageAll::Request(req)))
@@ -97,7 +97,6 @@ impl Peer {
     pub async fn event_loop(
         &mut self,
         framed: MsgFrameType,
-        data_sender: tokio::sync::mpsc::Sender<ResponsePiecePayload>,
         file_loader: FileLoader,
         // used for sending have messages to the peer
         has_receiver: tokio::sync::broadcast::Receiver<HavePayload>,
@@ -109,6 +108,7 @@ impl Peer {
         let (mut peer_writer, framed_rx) = framed.split();
 
         let peer_msg_stream = unfold(framed_rx, |mut framed| async move {
+            println!("peer_msg_stream");
             let Ok(Ok(message)) = framed.next().await.context("read message") else {
                 return None;
             };
@@ -118,6 +118,7 @@ impl Peer {
 
         // this is the stream sent by other connections to peers to send have messages
         let have_stream = unfold(has_receiver, |mut rx| async move {
+            println!("have_stream");
             let Ok(have_payload) = rx.recv().await else {
                 return None;
             };
@@ -128,6 +129,7 @@ impl Peer {
         let duration = std::time::Duration::from_secs(120);
         let timeout = tokio::time::interval_at(tokio::time::Instant::now() + duration, duration);
         let timeout_stream = unfold(timeout, |mut timeout| async move {
+            println!("timeout_stream");
             timeout.tick().await;
             Some((Msg::Timeout, timeout))
         });
@@ -163,6 +165,7 @@ impl Peer {
 
                                 let interested_msg: Message =
                                     Message::new(MessageAll::Interested(NoPayload));
+                                dbg!(&interested_msg);
                                 peer_writer
                                     .send(interested_msg)
                                     .await
@@ -193,8 +196,7 @@ impl Peer {
                                 }
                             }
                             MessageAll::Piece(response_piece_payload) => {
-                                data_sender.send(response_piece_payload).await?;
-
+                                file_loader.write_piece(response_piece_payload).await?;
                                 if !self.request_piece(&mut peer_writer, &file_loader).await? {
                                     continue;
                                     // let's pretend we are done
@@ -212,6 +214,9 @@ impl Peer {
                             .await?
                     }
                 }
+            } else {
+                eprintln!("peer disconnected");
+                break Err(anyhow::anyhow!("peer disconnected"));
             }
         }
     }
