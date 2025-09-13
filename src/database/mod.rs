@@ -49,6 +49,10 @@ impl FileInfo {
             torrent: file.torrent_path.into(),
         }
     }
+
+    fn is_finished(&self) -> bool {
+        self.bitfield.iter().all(|b| *b)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -67,7 +71,8 @@ pub struct FileLoader {
     file: Arc<Mutex<File>>,
     /// the info_hash is hex encoded here
     info_hash: [char; 40],
-    /// None if we're finished downloading, TODO: I might not event need the Option?
+    /// None if we're finished downloading, TODO: I might not even need the Option?
+    /// TODO: I need to keep track of the next download-piece aswell
     download_state: Arc<Mutex<Option<DownloadState>>>,
     // TODO: db_conn: Arc<Surreal<Db>> ??
     db_conn: Arc<Surreal<Db>>,
@@ -125,7 +130,7 @@ impl FileLoader {
             .context("context")?;
         dbg!(&file_info);
 
-        let download_state = match file_info.bitfield.iter().all(|b| *b) {
+        let download_state = match file_info.is_finished() {
             true => None,
             false => Some(DownloadState {
                 piece_i: rand::random_range(0..torrent.info.pieces.0.len() - 1) as u32, // -1 because we don't want to download the last piece since it might not be piece_length in size
@@ -144,13 +149,12 @@ impl FileLoader {
         })
     }
 
-    /// returns true if the download is finished
     pub fn is_finished(&self) -> bool {
         self.download_state.lock().unwrap().is_none()
-            || self.file_info.lock().unwrap().bitfield.iter().all(|b| *b)
+            || self.file_info.lock().unwrap().is_finished()
     }
 
-    pub fn get_block(&self, req_payload: RequestPiecePayload) -> Option<Vec<u8>> {
+    pub(super) fn get_block(&self, req_payload: RequestPiecePayload) -> Option<Vec<u8>> {
         let mut buf = BytesMut::with_capacity(req_payload.length as usize);
         let offset = req_payload.index as u64 * self.torrent.info.piece_length as u64
             + req_payload.begin as u64;
@@ -166,38 +170,32 @@ impl FileLoader {
     /// if we have all the blocks of a piece, we return None
     /// also it writes the piece to the file if the piece is complete
     pub(super) fn prepare_next_req_send(&self, peer_has: &[bool]) -> Option<RequestPiecePayload> {
-        let Some(ref mut download_state) = *self.download_state.lock().unwrap() else {
+        let Some(ref mut state) = *self.download_state.lock().unwrap() else {
             return None;
         };
         let i_have = &self.file_info.lock().unwrap().bitfield;
 
         // if I already have the piece choose the next one
-        if i_have[download_state.piece_i as usize] {
-            *download_state = self.get_next_download_state(peer_has, i_have)?;
+        if i_have[state.piece_i as usize] {
+            *state = self.get_next_download_state(peer_has, i_have)?;
         }
 
         //
         // choose next block
         //
-
-        let nblocks = download_state.get_n_blocks();
-
-        let block_length = download_state.get_block_len();
-
-        let req = RequestPiecePayload::new(
-            download_state.piece_i,
-            download_state.block_i * BLOCK_MAX,
-            block_length,
-        );
+        let nblocks = state.get_n_blocks();
+        let block_length = state.get_block_len();
+        let req = RequestPiecePayload::new(state.piece_i, state.block_i * BLOCK_MAX, block_length);
 
         // increment download_state if it's not the last one, otherwise calculate the next piece again
         // note: block_i starts at 0 and nblocks is a len but block_i is the index
         // of the block we want to write next and not the index of the block we return to write to
-        if download_state.block_i == nblocks {
-            *download_state = self.get_next_download_state(peer_has, i_have)?;
+        if state.block_i == nblocks {
+            *state = self.get_next_download_state(peer_has, i_have)?;
         } else {
-            download_state.block_i += 1;
+            state.block_i += 1;
         }
+        dbg!(&req);
         Some(req)
     }
 
@@ -211,10 +209,17 @@ impl FileLoader {
                 return Ok(());
             };
             let nblocks = state.get_n_blocks();
+            dbg!(&nblocks, &state);
 
             // the block_i is the index of the block we want to write
-            assert_eq!(payload.index, state.piece_i);
-            assert_eq!(payload.begin, (state.block_i - 1) * BLOCK_MAX);
+            // TODO: this is a huge issue since if we have multiple threads, one might already be at the next piece before we get here
+            if payload.index != state.piece_i || payload.begin != (state.block_i - 1) * BLOCK_MAX {
+                return Err(anyhow::anyhow!(
+                    "payload is not the next block we want to write"
+                ));
+            }
+            // assert_eq!(payload.index, state.piece_i);
+            // assert_eq!(payload.begin, (state.block_i - 1) * BLOCK_MAX);
             state.piece.extend_from_slice(&payload.block);
 
             if state.block_i < nblocks {
@@ -256,6 +261,12 @@ impl FileLoader {
 
         if updated.is_none() {
             panic!("No record was found");
+        }
+
+        if self.file_info.lock().unwrap().is_finished() {
+            println!("file is finished");
+            self.download_state.lock().unwrap().take();
+            return Ok(());
         }
 
         Ok(())

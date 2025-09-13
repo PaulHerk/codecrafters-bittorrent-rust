@@ -76,7 +76,7 @@ impl Peer {
         Ok(framed)
     }
 
-    async fn request_piece(
+    async fn request_next_piece(
         &mut self,
         peer_writer: &mut SplitSink<MsgFrameType, Message>,
         file_loader: &FileLoader,
@@ -165,7 +165,9 @@ impl Peer {
                                     .send(interested_msg)
                                     .await
                                     .context("write interested frame")?;
-                                let _ = self.request_piece(&mut peer_writer, &file_loader).await?;
+                                let _ = self
+                                    .request_next_piece(&mut peer_writer, &file_loader)
+                                    .await?;
 
                                 self.am_interested = true;
                             }
@@ -192,7 +194,10 @@ impl Peer {
                             }
                             MessageAll::Piece(response_piece_payload) => {
                                 file_loader.write_piece(response_piece_payload).await?;
-                                if !self.request_piece(&mut peer_writer, &file_loader).await? {
+                                if !self
+                                    .request_next_piece(&mut peer_writer, &file_loader)
+                                    .await?
+                                {
                                     continue;
                                     // let's pretend we are done
                                     // realistically, we should be seeding now
