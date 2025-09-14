@@ -26,11 +26,11 @@ pub struct Peer {
     pub has: Vec<bool>,
 }
 
-/// this enum is used to select between different stream-types
+/// this enum is used to select between different stream-types a peer can receive
 #[derive(Debug)]
 enum Msg {
-    /// this is sent by other peers in order for this particular peer to announce that it has the piece
-    HavePayload(HavePayload),
+    /// this will be sent to other peers in order to announce that it has the piece
+    ManagerMsg(PeerMsg),
     Data(Message),
     Timeout,
 }
@@ -119,10 +119,12 @@ impl Peer {
             let Ok(have_payload) = rx.recv().await else {
                 return None;
             };
-            Some((Msg::HavePayload(have_payload), rx))
+            Some((Msg::ManagerMsg(PeerMsg::Have(have_payload)), rx))
         });
         tokio::pin!(have_stream);
 
+        // TODO: I shouldn't send a timeout every 120s
+        // rather I should send it if I haven't received a message for 120s
         let duration = std::time::Duration::from_secs(120);
         let timeout = tokio::time::interval_at(tokio::time::Instant::now() + duration, duration);
         let timeout_stream = unfold(timeout, |mut timeout| async move {
@@ -136,13 +138,18 @@ impl Peer {
         loop {
             if let Some(message) = stream.next().await {
                 match message {
-                    Msg::HavePayload(have_payload) => {
-                        peer_writer
-                            .send(Message::new(MessageAll::Have(have_payload)))
-                            .await
-                            .context("send have")?;
-                        eprintln!("sent have");
-                    }
+                    Msg::ManagerMsg(peer_msg) => match peer_msg {
+                        PeerMsg::Shutdown => {
+                            todo!("shutdown peer")
+                        }
+                        PeerMsg::Have(have_payload) => {
+                            peer_writer
+                                .send(Message::new(MessageAll::Have(have_payload)))
+                                .await
+                                .context("send have")?;
+                            eprintln!("sent have");
+                        }
+                    },
                     Msg::Data(message) => {
                         match message.payload {
                             MessageAll::Choke(_no_payload) => {

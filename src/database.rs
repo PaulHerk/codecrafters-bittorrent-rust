@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::collections::VecDeque;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::os::unix::fs::FileExt;
@@ -24,6 +25,8 @@ use crate::BLOCK_MAX;
 use crate::RequestPiecePayload;
 use crate::ResponsePiecePayload;
 use crate::Torrent;
+
+const MAX_PIECES_IN_PARALLEL: usize = 2;
 
 /// Information about a file that gets downloaded/seeded
 #[derive(Debug, Clone)]
@@ -73,7 +76,7 @@ pub struct FileLoader {
     info_hash: [char; 40],
     /// None if we're finished downloading, TODO: I might not even need the Option?
     /// TODO: I need to keep track of the next download-piece aswell
-    download_state: Arc<Mutex<Option<DownloadState>>>,
+    download_state: Arc<Mutex<VecDeque<DownloadState>>>,
     // TODO: db_conn: Arc<Surreal<Db>> ??
     db_conn: Arc<Surreal<Db>>,
 }
@@ -82,15 +85,15 @@ pub struct FileLoader {
 struct DownloadState {
     piece_i: u32,
     block_i: u32,
-    piece: BytesMut,
+    piece: Arc<Mutex<Vec<u8>>>,
 }
 impl DownloadState {
     fn get_n_blocks(&self) -> u32 {
-        (self.piece.capacity() as u32).div_ceil(BLOCK_MAX)
+        (self.piece.lock().unwrap().capacity() as u32).div_ceil(BLOCK_MAX)
     }
 
     fn get_block_len(&self) -> u32 {
-        let piece_size = self.piece.capacity() as u32;
+        let piece_size = self.piece.lock().unwrap().capacity() as u32;
 
         if self.block_i == self.get_n_blocks() - 1 && piece_size % BLOCK_MAX != 0 {
             piece_size % BLOCK_MAX
@@ -130,14 +133,15 @@ impl FileLoader {
             .context("context")?;
         dbg!(&file_info);
 
-        let download_state = match file_info.is_finished() {
-            true => None,
-            false => Some(DownloadState {
-                piece_i: rand::random_range(0..torrent.info.pieces.0.len() - 1) as u32, // -1 because we don't want to download the last piece since it might not be piece_length in size
-                block_i: 0,
-                piece: BytesMut::with_capacity(torrent.info.piece_length as usize),
-            }),
-        };
+        let mut download_state = VecDeque::with_capacity(MAX_PIECES_IN_PARALLEL);
+        let piece_i = rand::random_range(0..torrent.info.pieces.0.len() - 1) as u32; // -1 because we don't want to download the last piece since it might not be piece_length in size
+        download_state.push_back(DownloadState {
+            piece_i,
+            block_i: 0,
+            piece: Arc::new(Mutex::new(Vec::with_capacity(
+                torrent.info.piece_length as usize,
+            ))),
+        });
 
         Ok(Self {
             file_info: Arc::new(Mutex::new(file_info)),
@@ -150,7 +154,7 @@ impl FileLoader {
     }
 
     pub fn is_finished(&self) -> bool {
-        self.download_state.lock().unwrap().is_none()
+        self.download_state.lock().unwrap().is_empty()
             || self.file_info.lock().unwrap().is_finished()
     }
 
@@ -170,30 +174,45 @@ impl FileLoader {
     /// if we have all the blocks of a piece, we return None
     /// also it writes the piece to the file if the piece is complete
     pub(super) fn prepare_next_req_send(&self, peer_has: &[bool]) -> Option<RequestPiecePayload> {
-        let Some(ref mut state) = *self.download_state.lock().unwrap() else {
+        let state = &mut *self.download_state.lock().unwrap();
+        if state.is_empty() {
             return None;
-        };
+        }
         let i_have = &self.file_info.lock().unwrap().bitfield;
 
-        // if I already have the piece choose the next one
-        if i_have[state.piece_i as usize] {
-            *state = self.get_next_download_state(peer_has, i_have)?;
+        // if I already have the piece, append a new one to the back of the queue
+        // this can happen if we have multiple threads
+        if let Some(front) = state.front()
+            && i_have[front.piece_i as usize]
+            && state.len() < MAX_PIECES_IN_PARALLEL
+        {
+            state.push_back(self.get_next_download_state(peer_has, i_have)?);
+        }
+        if state.len() == MAX_PIECES_IN_PARALLEL {
+            todo!("help other thread which might have a slow upload rate");
         }
 
         //
         // choose next block
         //
-        let nblocks = state.get_n_blocks();
-        let block_length = state.get_block_len();
-        let req = RequestPiecePayload::new(state.piece_i, state.block_i * BLOCK_MAX, block_length);
+        let back = state
+            .back_mut()
+            .expect("we checked that the queue is not empty");
+        let nblocks = back.get_n_blocks();
+        let block_length = back.get_block_len();
+        let req = RequestPiecePayload::new(back.piece_i, back.block_i * BLOCK_MAX, block_length);
 
         // increment download_state if it's not the last one, otherwise calculate the next piece again
         // note: block_i starts at 0 and nblocks is a len but block_i is the index
         // of the block we want to write next and not the index of the block we return to write to
-        if state.block_i == nblocks {
-            *state = self.get_next_download_state(peer_has, i_have)?;
+        if back.block_i == nblocks {
+            if state.len() < MAX_PIECES_IN_PARALLEL {
+                state.push_back(self.get_next_download_state(peer_has, i_have)?);
+            } else {
+                todo!("help other thread which might have a slow upload rate");
+            }
         } else {
-            state.block_i += 1;
+            back.block_i += 1;
         }
         dbg!(&req);
         Some(req)
@@ -202,35 +221,37 @@ impl FileLoader {
     // this function writes the piece to the file and updates the bitfield in Self and the DB
     pub(super) async fn write_piece(&self, payload: ResponsePiecePayload) -> anyhow::Result<()> {
         let new_bitfield: Cow<'static, [bool]> = {
-            let Some(ref mut state) = *self.download_state.lock().unwrap() else {
-                // we should not be here
-                // however if we do, should already be done with the download
-                eprintln!("no download state");
+            let state = &mut *self.download_state.lock().unwrap();
+            let Some(cur_state) = state.iter_mut().find(|s| s.piece_i == payload.index) else {
                 return Ok(());
             };
-            let nblocks = state.get_n_blocks();
-            dbg!(&nblocks, &state);
+            let nblocks = cur_state.get_n_blocks();
+            dbg!(&nblocks, &cur_state);
 
             // the block_i is the index of the block we want to write
             // TODO: this is a huge issue since if we have multiple threads, one might already be at the next piece before we get here
-            if payload.index != state.piece_i || payload.begin != (state.block_i - 1) * BLOCK_MAX {
+            if payload.begin != (cur_state.block_i - 1) * BLOCK_MAX {
                 return Err(anyhow::anyhow!(
                     "payload is not the next block we want to write"
                 ));
             }
-            // assert_eq!(payload.index, state.piece_i);
+            // assert_eq!(payload.indexstate.piece_i);
             // assert_eq!(payload.begin, (state.block_i - 1) * BLOCK_MAX);
-            state.piece.extend_from_slice(&payload.block);
+            cur_state
+                .piece
+                .lock()
+                .unwrap()
+                .extend_from_slice(&payload.block);
 
-            if state.block_i < nblocks {
+            if cur_state.block_i < nblocks {
                 // we can't write the piece yet
                 return Ok(());
             }
 
             let mut sha1 = Sha1::new();
-            sha1.update(&state.piece);
+            sha1.update(&cur_state.piece.lock().unwrap().as_slice());
             let hash: [u8; 20] = sha1.finalize().into();
-            let torrent_hash = self.torrent.info.pieces.0[state.piece_i as usize];
+            let torrent_hash = self.torrent.info.pieces.0[cur_state.piece_i as usize];
             if hash != torrent_hash {
                 return Err(anyhow::anyhow!("hash mismatch"));
             }
@@ -239,15 +260,15 @@ impl FileLoader {
                 .lock()
                 .unwrap()
                 .write_all_at(
-                    &state.piece,
-                    state.piece_i as u64 * self.torrent.info.piece_length as u64,
+                    &cur_state.piece.lock().unwrap(),
+                    cur_state.piece_i as u64 * self.torrent.info.piece_length as u64,
                 )
                 .context("write piece")?;
             let file_info = &mut self.file_info.lock().unwrap();
             let new_bitfield = file_info.bitfield.to_mut();
-            new_bitfield[state.piece_i as usize] = true;
+            new_bitfield[cur_state.piece_i as usize] = true;
 
-            println!("piece {} complete", state.piece_i);
+            println!("piece {} complete", cur_state.piece_i);
 
             new_bitfield.to_vec().into()
         };
@@ -265,7 +286,7 @@ impl FileLoader {
 
         if self.file_info.lock().unwrap().is_finished() {
             println!("file is finished");
-            self.download_state.lock().unwrap().take();
+            self.download_state.lock().unwrap().clear();
             return Ok(());
         }
 
@@ -288,7 +309,7 @@ impl FileLoader {
             Some(DownloadState {
                 piece_i: new_piece_i,
                 block_i: 0,
-                piece: BytesMut::with_capacity(piece_size as usize),
+                piece: Arc::new(Mutex::new(Vec::with_capacity(piece_size as usize))),
             })
         } else {
             None

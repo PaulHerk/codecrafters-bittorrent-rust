@@ -1,6 +1,7 @@
 pub mod database;
 pub mod messages;
 pub mod peer;
+mod req_manager;
 pub mod torrent;
 pub mod tracker;
 
@@ -13,6 +14,7 @@ pub use peer::handshake::*;
 // pub use peer::peer_data::*;
 pub use peer::states::*;
 pub use peer::*;
+pub use req_manager::*;
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 pub use torrent::*;
