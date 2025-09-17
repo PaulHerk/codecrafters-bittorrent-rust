@@ -1,3 +1,5 @@
+use std::io::SeekFrom;
+
 use anyhow::Context;
 use sha1::{Digest, Sha1};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
@@ -63,8 +65,21 @@ impl ReqManager {
 
     async fn write_piece_to_file(&mut self, piece_state: &PieceState) -> anyhow::Result<()> {
         let offset = piece_state.piece_i as u64 * self.torrent.info.piece_length as u64;
+        let current_position = self.file.stream_position().await?;
+
+        // If the offset is e.g. 1<<24 and the current position is 1<<2 then
+        // the offset from the current position won't fit into an i64 which it needs.
+        let (cur_offset, has_overflowed) = offset.overflowing_sub(current_position);
+        let seek = if let Ok(mut cur_offset) = <u64 as TryInto<i64>>::try_into(cur_offset) {
+            if has_overflowed {
+                cur_offset = -cur_offset;
+            }
+            SeekFrom::Current(cur_offset)
+        } else {
+            SeekFrom::Start(offset)
+        };
         self.file
-            .seek(std::io::SeekFrom::Start(offset))
+            .seek(seek)
             .await
             .context("seeking offset in file")?;
 
