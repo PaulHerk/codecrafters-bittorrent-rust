@@ -1,16 +1,12 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PeerState {
     /// before anything happened
+    #[default]
     NotConnected,
     /// if tcp connection is established
     Connected,
     /// after handshake succeeded
     DataTransfer,
-}
-impl Default for PeerState {
-    fn default() -> Self {
-        PeerState::NotConnected
-    }
 }
 
 // #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

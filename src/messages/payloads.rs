@@ -13,7 +13,7 @@ impl Payload for BitfieldPayload {
         let mut pieces_available = vec![false; payload.len() * 8];
         for (byte_i, byte) in payload.iter().enumerate() {
             let mut i = 0_u8;
-            while byte << i != 0 && i < 8 {
+            while i < 8 && byte << i != 0 {
                 pieces_available[byte_i * 8 + i as usize] = true;
                 i += 1;
             }
@@ -69,8 +69,8 @@ pub struct ResponsePiecePayload {
 impl Payload for ResponsePiecePayload {
     fn from_be_bytes(bytes: &[u8]) -> Self {
         let block_length = bytes.len() - 8;
-        let mut block = vec![0u8; block_length as usize];
-        block[..block_length as usize].copy_from_slice(&bytes[8..8 + block_length as usize]);
+        let mut block = vec![0u8; block_length];
+        block[..block_length].copy_from_slice(&bytes[8..8 + block_length]);
         Self {
             index: u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
             begin: u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]),
@@ -78,7 +78,7 @@ impl Payload for ResponsePiecePayload {
         }
     }
     fn to_be_bytes(&self) -> Vec<u8> {
-        let mut bytes = vec![0u8; 8 + self.block.len() as usize];
+        let mut bytes = vec![0u8; 8 + self.block.len()];
         bytes[0..4].copy_from_slice(&self.index.to_be_bytes());
         bytes[4..8].copy_from_slice(&self.begin.to_be_bytes());
         bytes[8..].copy_from_slice(&self.block);
