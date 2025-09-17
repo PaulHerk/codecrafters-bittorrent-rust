@@ -5,7 +5,9 @@ use sha1::{Digest, Sha1};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
 use super::{PieceState, ReqManager};
-use crate::{BLOCK_MAX, RequestPiecePayload, ResponsePiecePayload, Torrent};
+use crate::{
+    BLOCK_MAX, RequestPiecePayload, ResponsePiecePayload, Torrent, req_manager::BlockState,
+};
 
 impl ReqManager {
     /// writes a block to the buffer
@@ -15,7 +17,7 @@ impl ReqManager {
         &mut self,
         block: ResponsePiecePayload,
     ) -> anyhow::Result<Option<u32>> {
-        let Some(download_queue) = self.download_state.as_mut() else {
+        let Some(download_queue) = self.download_queue.as_mut() else {
             // we're finished
             return Ok(None);
         };
@@ -33,7 +35,7 @@ impl ReqManager {
 
         println!("got block");
         piece_state.update_state(block);
-        if piece_state.bitfield.iter().all(|b| *b) {
+        if piece_state.blocks.iter().all(|b| b.is_finished()) {
             // we're done with this piece
             let piece_state = download_queue.remove(queue_i).expect("Index exists.");
             self.handle_piece(&piece_state).await?;
@@ -109,8 +111,8 @@ impl PieceState {
         self.buf.extend_from_slice(&block.block);
 
         let block_i = block.begin as usize / BLOCK_MAX as usize;
-        assert!(block_i < self.bitfield.len());
-        self.bitfield.insert(block_i, true);
+        assert!(block_i < self.blocks.len());
+        self.blocks.insert(block_i, BlockState::Finished);
     }
 
     fn check_hash(&self, torrent: &Torrent) -> Result<(), anyhow::Error> {

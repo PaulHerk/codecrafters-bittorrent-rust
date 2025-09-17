@@ -11,7 +11,8 @@ use crate::{DBConnection, HavePayload, RequestPiecePayload, ResponsePiecePayload
 mod file_manager;
 mod req_preparer;
 
-pub const BLOCK_QUEUE_SIZE: usize = 10;
+pub const BLOCK_QUEUE_SIZE_MAX: usize = 10;
+const BLOCK_QUEUE_SIZE_MIN: usize = 3;
 /// how many pieces are in the queue at max
 const MAX_PIECES_IN_PARALLEL: usize = 2;
 
@@ -43,16 +44,33 @@ pub struct ReqManager {
     /// so let's cache it
     have: Vec<bool>,
     /// if it's None, we are finished
-    download_state: Option<VecDeque<PieceState>>,
+    download_queue: Option<VecDeque<PieceState>>,
     pub torrent: Torrent,
     /// this is also cached, it'll never change
     info_hash: String,
 }
 
+#[derive(Clone, Debug)]
 struct PieceState {
-    bitfield: Vec<bool>,
+    blocks: Vec<BlockState>,
     piece_i: u32,
     buf: Vec<u8>,
+}
+
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+enum BlockState {
+    Finished,
+    InProcess,
+    None,
+}
+
+impl BlockState {
+    pub(self) fn is_finished(&self) -> bool {
+        *self != BlockState::Finished
+    }
+    pub(self) fn is_none(&self) -> bool {
+        *self == BlockState::None
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -91,7 +109,7 @@ impl ReqManager {
             rx,
             broadcaster,
             have: file_info.bitfield.to_vec(),
-            download_state,
+            download_queue: download_state,
             torrent,
             info_hash,
         })
@@ -101,7 +119,7 @@ impl ReqManager {
         while let Some(msg) = self.rx.recv().await {
             match msg {
                 ReqMessage::NeedBlocksToReq { tx, peer_has } => {
-                    let blocks = self.prepare_next_blocks(BLOCK_QUEUE_SIZE, peer_has);
+                    let blocks = self.prepare_next_blocks(BLOCK_QUEUE_SIZE_MAX, peer_has);
                     tx.send(blocks).unwrap();
                 }
                 ReqMessage::GotBlock { block } => {
