@@ -1,8 +1,8 @@
 use rand::seq::IndexedRandom;
 
 use crate::{
-    BLOCK_MAX, BLOCK_QUEUE_SIZE_MAX, RequestPiecePayload, Torrent,
-    req_manager::{BLOCK_QUEUE_SIZE_MIN, BlockState, PieceState},
+    BLOCK_MAX, RequestPiecePayload, Torrent,
+    req_manager::{BLOCK_QUEUE_SIZE_MIN, BlockState, MAX_PIECES_IN_PARALLEL, PieceState},
 };
 
 use super::ReqManager;
@@ -27,11 +27,19 @@ impl ReqManager {
             .find(|state| {
                 let peer_has_it = peer_has[state.piece_i as usize] == true;
                 let blocks_we_need = state.blocks.iter().filter(|b| b.is_none()).count();
-                return peer_has_it && blocks_we_need >= BLOCK_QUEUE_SIZE_MIN;
+                return peer_has_it && blocks_we_need >= 1;
             })
             .cloned();
+        dbg!(
+            &download_queue
+                .iter()
+                .map(|s| (s.piece_i, &s.blocks))
+                .collect::<Vec<_>>()
+        );
         if let None = piece {
-            self.add_piece_to_queue(&peer_has);
+            if !self.add_piece_to_queue(&peer_has) {
+                return Vec::new();
+            };
         }
         let Some(download_queue) = &mut self.download_queue else {
             unreachable!("we checked that before")
@@ -39,7 +47,9 @@ impl ReqManager {
         let piece = piece.or(download_queue.back_mut().cloned());
 
         let Some(mut piece) = piece else {
-            return Vec::new();
+            unreachable!(
+                "the download_queue will have a last piece, because it may have been added by self.add_piece_to_queue. If it hasn't, we checked that."
+            );
         };
 
         let mut requests = Vec::with_capacity(n);
@@ -66,7 +76,7 @@ impl ReqManager {
         let Some(queue) = &mut self.download_queue else {
             return false;
         };
-        if queue.len() == BLOCK_QUEUE_SIZE_MAX {
+        if queue.len() == MAX_PIECES_IN_PARALLEL {
             return false;
         }
 
@@ -75,7 +85,13 @@ impl ReqManager {
             .iter()
             .zip(peer_has)
             .enumerate()
-            .filter_map(|(index, (i, p))| if *i && *p { Some(index as u32) } else { None })
+            .filter_map(|(index, (i, p))| {
+                if !*i && *p && queue.iter().find(|s| s.piece_i == index as u32).is_none() {
+                    Some(index as u32)
+                } else {
+                    None
+                }
+            })
             .collect();
 
         let Some(piece_i) = possible_pieces.choose(&mut rand::rng()) else {
@@ -96,9 +112,9 @@ impl PieceState {
         let n_blocks = piece_size.div_ceil(BLOCK_MAX);
 
         PieceState {
-            blocks: Vec::with_capacity(n_blocks as usize),
+            blocks: vec![BlockState::None; n_blocks as usize],
             piece_i,
-            buf: Vec::with_capacity(piece_size as usize),
+            buf: vec![0; piece_size as usize],
         }
     }
 }

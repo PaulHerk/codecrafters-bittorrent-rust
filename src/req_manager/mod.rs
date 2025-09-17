@@ -14,9 +14,10 @@ mod req_preparer;
 pub const BLOCK_QUEUE_SIZE_MAX: usize = 10;
 const BLOCK_QUEUE_SIZE_MIN: usize = 3;
 /// how many pieces are in the queue at max
-const MAX_PIECES_IN_PARALLEL: usize = 2;
+pub(self) const MAX_PIECES_IN_PARALLEL: usize = 2;
 
 /// This enum will be sent to the ReqManager from a peer
+#[derive(Debug)]
 pub enum ReqMessage {
     NeedBlocksToReq {
         peer_has: Vec<bool>,
@@ -66,7 +67,7 @@ enum BlockState {
 
 impl BlockState {
     pub(self) fn is_finished(&self) -> bool {
-        *self != BlockState::Finished
+        *self == BlockState::Finished
     }
     pub(self) fn is_none(&self) -> bool {
         *self == BlockState::None
@@ -100,6 +101,11 @@ impl ReqManager {
             .await
             .context("opening file")?;
 
+        // // if the file didn't exist before, we want to fill it with all zeroes
+        // if file_info.bitfield.iter().all(|b| *b == false) {
+        //     file.set_len(torrent.get_length() as u64).await?;
+        // }
+
         let download_state = if file_info.is_finished() {
             None
         } else {
@@ -124,10 +130,10 @@ impl ReqManager {
             match msg {
                 ReqMessage::NeedBlocksToReq { tx, peer_has } => {
                     let blocks = self.prepare_next_blocks(BLOCK_QUEUE_SIZE_MAX, peer_has);
-                    tx.send(blocks).unwrap();
+                    tx.send(dbg!(blocks)).unwrap();
                 }
                 ReqMessage::GotBlock { block } => {
-                    if let Some(piece_index) = self.write_block(block).await? {
+                    if let Some(piece_index) = dbg!(self.write_block(block).await)? {
                         self.broadcaster
                             .send(PeerMsg::Have(HavePayload { piece_index }))
                             .context("sending have message to local peers")?;

@@ -163,9 +163,9 @@ async fn main() -> anyhow::Result<()> {
                         .await
                         .unwrap();
                 });
-
-                std::thread::sleep(std::time::Duration::MAX);
             }
+
+            std::thread::sleep(std::time::Duration::MAX);
         } // DecodeMetadataType::Download { output, torrent } => {
           //     let torrent = read_torrent(torrent)?;
           //     let output = match output {

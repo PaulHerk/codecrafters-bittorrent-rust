@@ -12,6 +12,7 @@ use surrealdb::opt::PatchOp;
 // For a RocksDB file
 use surrealdb::engine::local::RocksDb;
 
+use crate::BLOCK_MAX;
 use crate::Torrent;
 
 /// the actual data stored in the DB
@@ -25,9 +26,9 @@ pub struct FileInfo {
 }
 
 impl FileInfo {
-    fn from_new_file(file_path: PathBuf, torrent_path: PathBuf, piece_length: usize) -> Self {
+    fn from_new_file(file_path: PathBuf, torrent_path: PathBuf, n_pieces: usize) -> Self {
         Self {
-            bitfield: (vec![false; piece_length]).into(),
+            bitfield: (vec![false; n_pieces]).into(),
             file: file_path.into(),
             torrent: torrent_path.into(),
         }
@@ -66,8 +67,7 @@ impl DBConnection {
             Some(path) => path,
             None => PathBuf::from(&torrent.info.name),
         };
-        let file =
-            FileInfo::from_new_file(file_path, torrent_path, torrent.info.piece_length as usize);
+        let file = FileInfo::from_new_file(file_path, torrent_path, torrent.info.pieces.0.len());
 
         // so I have to create the content already since it would complain that the content is invalid
         // TODO: do with select

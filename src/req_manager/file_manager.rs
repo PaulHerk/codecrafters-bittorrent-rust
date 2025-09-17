@@ -36,6 +36,7 @@ impl ReqManager {
         println!("got block");
         piece_state.update_state(block);
         if piece_state.blocks.iter().all(|b| b.is_finished()) {
+            println!("piece {} is done", piece_state.piece_i);
             // we're done with this piece
             let piece_state = download_queue.remove(queue_i).expect("Index exists.");
             self.handle_piece(&piece_state).await?;
@@ -67,25 +68,27 @@ impl ReqManager {
 
     async fn write_piece_to_file(&mut self, piece_state: &PieceState) -> anyhow::Result<()> {
         let offset = piece_state.piece_i as u64 * self.torrent.info.piece_length as u64;
-        let current_position = self.file.stream_position().await?;
+        // let current_position = self.file.stream_position().await?;
 
-        // If the offset is e.g. 1<<24 and the current position is 1<<2 then
-        // the offset from the current position won't fit into an i64 which it needs.
-        let (cur_offset, has_overflowed) = offset.overflowing_sub(current_position);
-        let seek = if let Ok(mut cur_offset) = <u64 as TryInto<i64>>::try_into(cur_offset) {
-            if has_overflowed {
-                cur_offset = -cur_offset;
-            }
-            SeekFrom::Current(cur_offset)
-        } else {
-            SeekFrom::Start(offset)
-        };
+        // // If the offset is e.g. 1<<24 and the current position is 1<<2 then
+        // // the offset from the current position won't fit into an i64 which it needs.
+        // let (cur_offset, has_overflowed) = offset.overflowing_sub(current_position);
+        // let seek = if let Ok(mut cur_offset) = <u64 as TryInto<i64>>::try_into(cur_offset) {
+        //     if has_overflowed {
+        //         cur_offset = -cur_offset;
+        //     }
+        //     SeekFrom::Current(cur_offset)
+        // } else {
+        //     SeekFrom::Start(offset)
+        // };
+        let seek = SeekFrom::Start(offset);
+        dbg!(seek);
         self.file
             .seek(seek)
             .await
             .context("seeking offset in file")?;
 
-        let mut buf = piece_state.buf.as_slice();
+        let mut buf = &piece_state.buf[..];
         self.file
             .write_all_buf(&mut buf)
             .await
@@ -102,11 +105,14 @@ impl ReqManager {
 
 impl PieceState {
     fn update_state(&mut self, block: ResponsePiecePayload) {
-        self.buf.extend_from_slice(&block.block);
+        let block_len = block.block.len();
+        let block_begin = block.begin as usize;
+        let block_end = block_begin + block_len;
+        self.buf[block_begin..block_end].copy_from_slice(&block.block);
 
         let block_i = block.begin as usize / BLOCK_MAX as usize;
         assert!(block_i < self.blocks.len());
-        self.blocks.insert(block_i, BlockState::Finished);
+        self.blocks[block_i] = BlockState::Finished;
     }
 
     fn check_hash(&self, torrent: &Torrent) -> Result<(), anyhow::Error> {

@@ -162,7 +162,7 @@ impl Peer {
                                         .send(interested_msg)
                                         .await
                                         .context("write interested frame")?;
-                                    self.req_next_block(&mut peer_writer).await?;
+                                    self.req_next_block(&mut peer_writer, &manager_tx).await?;
                                 }
 
                                 self.am_interested = true;
@@ -176,7 +176,6 @@ impl Peer {
                                 };
                                 manager_tx.send(msg).await?;
                                 let block = rx.await;
-                                // let block = file_loader.get_block(request_piece_payload);
                                 if let Ok(response_piece_payload) = block {
                                     peer_writer
                                         .send(Message::new(MessageAll::Piece(
@@ -196,7 +195,7 @@ impl Peer {
                                 };
                                 manager_tx.send(msg).await?;
 
-                                self.req_next_block(&mut peer_writer).await?;
+                                self.req_next_block(&mut peer_writer, &manager_tx).await?;
                             }
                             MessageAll::Cancel(_request_piece_payload) => todo!(), // only for extension, won't probably use it
                             MessageAll::KeepAlive(_no_payload) => eprintln!("he sent a keep alive"),
@@ -215,16 +214,28 @@ impl Peer {
         }
     }
 
-    async fn req_next_block(&mut self, peer_writer: &mut PeerWriter) -> anyhow::Result<()> {
+    async fn req_next_block(
+        &mut self,
+        peer_writer: &mut PeerWriter,
+        manager_tx: &mpsc::Sender<ReqMessage>,
+    ) -> anyhow::Result<()> {
         let Some(queue) = &mut self.req_queue else {
             return Ok(());
         };
+        if queue.is_empty() {
+            let (tx, rx) = oneshot::channel();
+            let msg = ReqMessage::NeedBlocksToReq {
+                peer_has: self.has.clone(),
+                tx,
+            };
+            manager_tx.send(msg).await?;
+            *queue = rx.await?;
+        }
         if let Some(req) = queue.pop() {
             let req_msg = Message::new(MessageAll::Request(req));
             peer_writer.send(req_msg).await.context("Writing req")?;
         } else {
-            // TODO: maybe req new queue?
-            // also we should set the interested flag to false if there's no more data to req
+            // TODO: set interested to false
         }
 
         Ok(())
