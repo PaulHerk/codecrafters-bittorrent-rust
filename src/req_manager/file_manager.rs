@@ -98,12 +98,6 @@ impl ReqManager {
     pub(super) fn get_block(&self, req_payload: RequestPiecePayload) -> ResponsePiecePayload {
         todo!()
     }
-
-    pub(super) fn get_have(&self) -> Vec<bool> {
-        todo!("assert that self.have is the same as the DB");
-        todo!("return self.have");
-        self.have.clone()
-    }
 }
 
 impl PieceState {

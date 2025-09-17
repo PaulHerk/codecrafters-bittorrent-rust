@@ -1,7 +1,7 @@
-use std::ops::Deref;
+use rand::seq::IndexedRandom;
 
 use crate::{
-    BLOCK_MAX, BLOCK_QUEUE_SIZE_MAX, RequestPiecePayload,
+    BLOCK_MAX, BLOCK_QUEUE_SIZE_MAX, RequestPiecePayload, Torrent,
     req_manager::{BLOCK_QUEUE_SIZE_MIN, BlockState, PieceState},
 };
 
@@ -63,7 +63,53 @@ impl ReqManager {
     /// checks whether the queue is full, if not adds a new item
     /// returns whether a new piece is added (true) or not (false)
     pub(super) fn add_piece_to_queue(&mut self, peer_has: &Vec<bool>) -> bool {
-        todo!()
+        let Some(queue) = &mut self.download_queue else {
+            return false;
+        };
+        if queue.len() == BLOCK_QUEUE_SIZE_MAX {
+            return false;
+        }
+
+        let possible_pieces: Vec<u32> = self
+            .have
+            .iter()
+            .zip(peer_has)
+            .enumerate()
+            .filter_map(|(index, (i, p))| if *i && *p { Some(index as u32) } else { None })
+            .collect();
+
+        let Some(piece_i) = possible_pieces.choose(&mut rand::rng()) else {
+            return false;
+        };
+
+        let piece_state = PieceState::new(&self.torrent, *piece_i);
+        queue.push_back(piece_state);
+
+        true
+    }
+}
+
+impl PieceState {
+    /// calculates n_blocks and piece_size and creates a new PieceState
+    fn new(torrent: &Torrent, piece_i: u32) -> Self {
+        let piece_size = get_piece_size(torrent, piece_i);
+        let n_blocks = piece_size.div_ceil(BLOCK_MAX);
+
+        PieceState {
+            blocks: Vec::with_capacity(n_blocks as usize),
+            piece_i,
+            buf: Vec::with_capacity(piece_size as usize),
+        }
+    }
+}
+
+fn get_piece_size(torrent: &Torrent, piece_i: u32) -> u32 {
+    let length = torrent.get_length();
+    let piece_length = torrent.info.piece_length;
+    if piece_i == torrent.info.pieces.0.len() as u32 - 1 && length % piece_length != 0 {
+        length % piece_length
+    } else {
+        piece_length
     }
 }
 

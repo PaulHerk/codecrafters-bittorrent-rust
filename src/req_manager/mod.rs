@@ -130,8 +130,7 @@ impl ReqManager {
                     };
                 }
                 ReqMessage::NeedBlock { block, tx } => {
-                    let have = self.get_have();
-                    if have[block.index as usize] {
+                    if self.have[block.index as usize] {
                         let block = self.get_block(block);
                         tx.send(block).unwrap();
                     } else {
@@ -141,8 +140,7 @@ impl ReqManager {
                     }
                 }
                 ReqMessage::WhatDoWeHave { tx } => {
-                    let have = self.get_have();
-                    tx.send(have).unwrap();
+                    tx.send(self.have.clone()).unwrap();
                 }
             }
         }
