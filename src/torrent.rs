@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf};
 
 use anyhow::Context;
 pub use hashes::Hashes;
@@ -70,12 +70,20 @@ pub struct Torrent {
 }
 
 impl Torrent {
-    pub fn info_hash(&self) -> Result<[u8; 20], anyhow::Error> {
+    pub fn read_from_file(path: &PathBuf) -> anyhow::Result<Self> {
+        let bytes = std::fs::read(path).context("read torrent file")?;
+        let torrent = serde_bencode::from_bytes::<Torrent>(&bytes).context("decode torrent")?;
+
+        Ok(torrent)
+    }
+    pub fn info_hash(&self) -> [u8; 20] {
         let mut hasher = Sha1::new();
-        let bytes = serde_bencode::to_bytes(&self.info).context("re-encode info")?;
+        let bytes = serde_bencode::to_bytes(&self.info)
+            .context("re-encode info")
+            .expect("If this doesn't work, the file provided is invalid");
         hasher.update(&bytes);
         let info_hash = hasher.finalize();
-        Ok(info_hash.into())
+        info_hash.into()
     }
 
     pub fn get_length(&self) -> u32 {

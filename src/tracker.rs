@@ -3,11 +3,11 @@ use serde::{Deserialize, Serialize};
 use crate::tracker::peers::PeerConnections;
 
 #[derive(Debug, Clone, Serialize)]
-pub struct TrackerRequest {
+pub struct TrackerRequest<'a> {
     /// the info hash of the torrent
-    pub info_hash: [u8; 20],
+    pub info_hash: &'a [u8; 20],
     /// a unique identifier for your client
-    pub peer_id: [u8; 20],
+    pub peer_id: &'a [u8; 20],
     /// the port your client is listening on
     pub port: u16,
     /// the total amount uploaded so far
@@ -21,8 +21,13 @@ pub struct TrackerRequest {
     pub compact: u8,
 }
 
-impl TrackerRequest {
-    pub fn new(info_hash: [u8; 20], peer_id: [u8; 20], port: u16, file_length: u32) -> Self {
+impl<'a> TrackerRequest<'a> {
+    pub fn new(
+        info_hash: &'a [u8; 20],
+        peer_id: &'a [u8; 20],
+        port: u16,
+        file_length: u32,
+    ) -> Self {
         Self {
             info_hash,
             peer_id,

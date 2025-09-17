@@ -8,10 +8,11 @@ use crate::{BLOCK_MAX, RequestPiecePayload, ResponsePiecePayload, Torrent};
 impl ReqManager {
     /// writes a block to the buffer
     /// if it's the last block of a piece, it checks the hash, updates the bitfield and writes the piece to the file
-    pub(super) async fn write_block(&mut self, block: ResponsePiecePayload) {
+    /// returns Some index of the piece if it's finished
+    pub(super) async fn write_block(&mut self, block: ResponsePiecePayload) -> Option<u32> {
         let Some(download_queue) = self.download_state.as_mut() else {
             // we're finished
-            return;
+            return None;
         };
         let piece_state = download_queue
             .iter_mut()
@@ -20,6 +21,7 @@ impl ReqManager {
                 todo!("create new state for piece if the size is less that MAX_PIECES_IN_PARALLEL");
             });
 
+        println!("got block");
         piece_state.update_state(block);
         if piece_state.bitfield.iter().all(|b| *b) {
             // we're done with this piece
@@ -31,10 +33,13 @@ impl ReqManager {
                 "remove piece_state from download queue, I cannot do pop_front because it might be that the front one is slow and the last one finishes earlier"
             );
             // cannot do: states.pop_front();
+            // TODO: write block to file
+            todo!("write piece");
+
+            Some(piece_state.piece_i)
+        } else {
+            None
         }
-        // TODO: write block to file
-        println!("got block");
-        todo!("write block")
     }
 
     /// returns a block a peer requested
