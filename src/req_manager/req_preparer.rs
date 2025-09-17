@@ -2,7 +2,7 @@ use rand::seq::IndexedRandom;
 
 use crate::{
     BLOCK_MAX, RequestPiecePayload, Torrent,
-    req_manager::{BLOCK_QUEUE_SIZE_MIN, BlockState, MAX_PIECES_IN_PARALLEL, PieceState},
+    req_manager::{BlockState, MAX_PIECES_IN_PARALLEL, PieceState},
 };
 
 use super::ReqManager;
@@ -18,16 +18,15 @@ impl ReqManager {
             return Vec::new();
         };
 
-        // 1. try if we have something in the download queue
-        // 2. if not, add something to the queue: realistically rarest-first
-        // 3. proceed
-
+        // 1. Try if we have something in the download queue
         let piece = download_queue
             .iter_mut()
             .find(|state| {
                 let peer_has_it = peer_has[state.piece_i as usize] == true;
-                let blocks_we_need = state.blocks.iter().filter(|b| b.is_none()).count();
-                return peer_has_it && blocks_we_need >= 1;
+                let blocks_we_need = state.blocks.iter().filter(|b| b.is_none());
+                // TODO: now currently if there's only one block remaining in the queue, it will return only that one
+                // we might want to return that plus like 9 more of the next piece
+                return peer_has_it && blocks_we_need.count() >= 1;
             })
             .cloned();
         dbg!(
@@ -36,11 +35,13 @@ impl ReqManager {
                 .map(|s| (s.piece_i, &s.blocks))
                 .collect::<Vec<_>>()
         );
+        // 2. If not, add something to the queue: realistically rarest-first
         if let None = piece {
             if !self.add_piece_to_queue(&peer_has) {
                 return Vec::new();
             };
         }
+        // we also need new mutable access to the download_queue since self might have changed above
         let Some(download_queue) = &mut self.download_queue else {
             unreachable!("we checked that before")
         };
@@ -52,11 +53,17 @@ impl ReqManager {
             );
         };
 
+        // 3. Actually create the responses
         let mut requests = Vec::with_capacity(n);
         let n_blocks = piece.blocks.capacity() as u32;
         let piece_size = piece.buf.capacity() as u32;
 
-        for (block_i, block) in piece.blocks.iter_mut().enumerate() {
+        for (block_i, block) in piece
+            .blocks
+            .iter_mut()
+            .enumerate()
+            .filter(|(_, b)| b.is_none())
+        {
             let block_i = block_i as u32;
             let index = piece.piece_i;
             let begin = block_i * BLOCK_MAX;

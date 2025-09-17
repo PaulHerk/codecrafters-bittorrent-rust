@@ -1,10 +1,11 @@
-use std::{collections::VecDeque, path::PathBuf};
+use std::{
+    collections::VecDeque,
+    fs::{File, OpenOptions},
+    path::PathBuf,
+};
 
 use anyhow::Context;
-use tokio::{
-    fs::{File, OpenOptions},
-    sync::{mpsc, oneshot},
-};
+use tokio::sync::{mpsc, oneshot};
 
 use crate::{DBConnection, HavePayload, RequestPiecePayload, ResponsePiecePayload, Torrent};
 
@@ -98,7 +99,6 @@ impl ReqManager {
             .append(true)
             .truncate(false)
             .open(&file_info.file)
-            .await
             .context("opening file")?;
 
         // // if the file didn't exist before, we want to fill it with all zeroes

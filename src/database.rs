@@ -12,7 +12,6 @@ use surrealdb::opt::PatchOp;
 // For a RocksDB file
 use surrealdb::engine::local::RocksDb;
 
-use crate::BLOCK_MAX;
 use crate::Torrent;
 
 /// the actual data stored in the DB
