@@ -2,7 +2,7 @@ use std::{collections::VecDeque, path::PathBuf};
 
 use anyhow::Context;
 use tokio::{
-    fs::File,
+    fs::{File, OpenOptions},
     sync::{mpsc, oneshot},
 };
 
@@ -92,7 +92,11 @@ impl ReqManager {
             .set_and_get_file(file_path, torrent_path, &torrent)
             .await?;
 
-        let file = tokio::fs::File::open(&file_info.file)
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .truncate(false)
+            .open(&file_info.file)
             .await
             .context("opening file")?;
 

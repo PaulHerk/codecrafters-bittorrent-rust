@@ -61,31 +61,25 @@ impl DBConnection {
     ) -> anyhow::Result<FileInfo> {
         // read the torrent file
         let info_hash_hex = &hex::encode(torrent.info_hash());
+        // get the file path, create a new entry and insert it
+        let file_path = match file_path {
+            Some(path) => path,
+            None => PathBuf::from(&torrent.info.name),
+        };
+        let file =
+            FileInfo::from_new_file(file_path, torrent_path, torrent.info.piece_length as usize);
 
+        // so I have to create the content already since it would complain that the content is invalid
+        // TODO: do with select
         let file_info = match self
             .0
             .create::<Option<FileInfo>>(("files", info_hash_hex))
+            .content(file)
             .await
         {
-            Ok(_created) => {
-                // get the file path, create a new entry and insert it
-                let file_path = match file_path {
-                    Some(path) => path,
-                    None => PathBuf::from(&torrent.info.name),
-                };
-                let file = FileInfo::from_new_file(
-                    file_path,
-                    torrent_path,
-                    torrent.info.piece_length as usize,
-                );
-                let file_info: Option<FileInfo> = self
-                    .0
-                    .insert(("files", info_hash_hex))
-                    .content(file)
-                    .await?;
-                return Ok(file_info.expect("Not even sure when this is None in the first place.."));
+            Ok(created) => {
+                return Ok(created.expect("Not even sure when this is None in the first place.."));
             }
-
             Err(e) => {
                 if let surrealdb::Error::Db(ref e) = e
                     && let surrealdb::error::Db::RecordExists { thing } = e
