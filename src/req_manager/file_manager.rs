@@ -1,4 +1,4 @@
-use std::{io::SeekFrom, os::unix::fs::FileExt};
+use std::os::unix::fs::FileExt;
 
 use anyhow::Context;
 use sha1::{Digest, Sha1};
