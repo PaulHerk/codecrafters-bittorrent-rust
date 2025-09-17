@@ -1,7 +1,6 @@
 use std::{collections::VecDeque, path::PathBuf};
 
 use anyhow::Context;
-use surrealdb::{Surreal, engine::local::Db};
 use tokio::{
     fs::File,
     sync::{mpsc, oneshot},
@@ -13,6 +12,8 @@ mod file_manager;
 mod req_preparer;
 
 pub const BLOCK_QUEUE_SIZE: usize = 10;
+/// how many pieces are in the queue at max
+const MAX_PIECES_IN_PARALLEL: usize = 2;
 
 /// This enum will be sent to the ReqManager from a peer
 pub enum ReqMessage {
@@ -35,7 +36,7 @@ pub enum ReqMessage {
 pub struct ReqManager {
     /// the output file
     file: File,
-    db_conn: Surreal<Db>,
+    db_conn: DBConnection,
     rx: mpsc::Receiver<ReqMessage>,
     broadcaster: tokio::sync::broadcast::Sender<PeerMsg>,
     /// I need this information too often to always query the DB
@@ -44,6 +45,8 @@ pub struct ReqManager {
     /// if it's None, we are finished
     download_state: Option<VecDeque<PieceState>>,
     pub torrent: Torrent,
+    /// this is also cached, it'll never change
+    info_hash: String,
 }
 
 struct PieceState {
@@ -78,17 +81,19 @@ impl ReqManager {
         let download_state = if file_info.is_finished() {
             None
         } else {
-            Some(VecDeque::with_capacity(2))
+            Some(VecDeque::with_capacity(MAX_PIECES_IN_PARALLEL))
         };
+        let info_hash = hex::encode(torrent.info_hash());
 
         Ok(Self {
             file,
-            db_conn: db_conn.0,
+            db_conn,
             rx,
             broadcaster,
             have: file_info.bitfield.to_vec(),
             download_state,
             torrent,
+            info_hash,
         })
     }
 
@@ -100,7 +105,7 @@ impl ReqManager {
                     tx.send(blocks).unwrap();
                 }
                 ReqMessage::GotBlock { block } => {
-                    if let Some(piece_index) = self.write_block(block).await {
+                    if let Some(piece_index) = self.write_block(block).await? {
                         self.broadcaster
                             .send(PeerMsg::Have(HavePayload { piece_index }))
                             .context("sending have message to local peers")?;

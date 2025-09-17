@@ -148,7 +148,7 @@ async fn main() -> anyhow::Result<()> {
             let response = get_response(&torrent, &info_hash).await?;
 
             tokio::spawn(async move {
-                req_manager.run().await;
+                let _ = req_manager.run().await;
             });
 
             for peer in response.peers.0.iter() {

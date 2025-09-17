@@ -1,17 +1,10 @@
 use std::borrow::Cow;
-use std::collections::VecDeque;
-use std::fs::File;
-use std::fs::OpenOptions;
-use std::os::unix::fs::FileExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Context;
-use bytes::BytesMut;
-use rand::seq::IteratorRandom;
 use serde::{Deserialize, Serialize};
-use sha1::{Digest, Sha1};
 use surrealdb::RecordId;
 use surrealdb::Surreal;
 use surrealdb::engine::local::Db;
@@ -22,11 +15,7 @@ use surrealdb::engine::local::RocksDb;
 use tracing_mutex::stdsync::Mutex;
 
 use crate::BLOCK_MAX;
-use crate::RequestPiecePayload;
-use crate::ResponsePiecePayload;
 use crate::Torrent;
-
-const MAX_PIECES_IN_PARALLEL: usize = 2;
 
 /// the actual data stored in the DB
 /// torrent path is also the key
@@ -61,19 +50,19 @@ struct Record {
 pub struct DBConnection(pub Surreal<Db>);
 
 /// used for up- and downloading data from a file
-#[derive(Debug, Clone)]
-pub struct FileLoader {
-    file_info: Arc<Mutex<FileInfo>>,
-    pub torrent: Arc<Torrent>,
-    file: Arc<Mutex<File>>,
-    /// the info_hash is hex encoded here
-    info_hash: [char; 40],
-    /// None if we're finished downloading, TODO: I might not even need the Option?
-    /// TODO: I need to keep track of the next download-piece aswell
-    download_state: Arc<Mutex<VecDeque<DownloadState>>>,
-    // TODO: db_conn: Arc<Surreal<Db>> ??
-    db_conn: Arc<Surreal<Db>>,
-}
+// #[derive(Debug, Clone)]
+// pub struct FileLoader {
+//     file_info: Arc<Mutex<FileInfo>>,
+//     pub torrent: Arc<Torrent>,
+//     file: Arc<Mutex<File>>,
+//     /// the info_hash is hex encoded here
+//     info_hash: [char; 40],
+//     /// None if we're finished downloading, TODO: I might not even need the Option?
+//     /// TODO: I need to keep track of the next download-piece aswell
+//     download_state: Arc<Mutex<VecDeque<DownloadState>>>,
+//     // TODO: db_conn: Arc<Surreal<Db>> ??
+//     db_conn: Arc<Surreal<Db>>,
+// }
 
 #[derive(Debug, Clone)]
 struct DownloadState {
@@ -95,13 +84,6 @@ impl DownloadState {
             BLOCK_MAX
         }
     }
-}
-
-fn read_torrent(torrent: &PathBuf) -> anyhow::Result<Torrent> {
-    let bytes = std::fs::read(torrent).context("read torrent file")?;
-    let torrent = serde_bencode::from_bytes::<Torrent>(&bytes).context("decode torrent")?;
-
-    Ok(torrent)
 }
 
 // impl FileLoader {
@@ -397,5 +379,26 @@ impl DBConnection {
         }?;
 
         Ok(file_info)
+    }
+
+    pub(super) async fn update_bitfields(
+        &mut self,
+        info_hash: &str,
+        new_bitfield: Vec<bool>,
+    ) -> anyhow::Result<()> {
+        let updated: Option<FileInfo> = self
+            .0
+            .update(("files", info_hash))
+            .patch(PatchOp::replace("/bitfield", new_bitfield))
+            .await
+            .context("Updating the DB entry.")?;
+        dbg!(&updated);
+
+        assert!(
+            updated.is_some(),
+            "The record for the torrent was already created if wasn't there."
+        );
+
+        Ok(())
     }
 }

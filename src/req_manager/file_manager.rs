@@ -1,45 +1,80 @@
+use anyhow::Context;
 use sha1::{Digest, Sha1};
-use surrealdb::{Surreal, engine::local::Db};
-use tokio::fs::File;
+use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
 use super::{PieceState, ReqManager};
 use crate::{BLOCK_MAX, RequestPiecePayload, ResponsePiecePayload, Torrent};
 
 impl ReqManager {
     /// writes a block to the buffer
-    /// if it's the last block of a piece, it checks the hash, updates the bitfield and writes the piece to the file
+    /// handles the piece if it's the last one
     /// returns Some index of the piece if it's finished
-    pub(super) async fn write_block(&mut self, block: ResponsePiecePayload) -> Option<u32> {
+    pub(super) async fn write_block(
+        &mut self,
+        block: ResponsePiecePayload,
+    ) -> anyhow::Result<Option<u32>> {
         let Some(download_queue) = self.download_state.as_mut() else {
             // we're finished
-            return None;
+            return Ok(None);
         };
-        let piece_state = download_queue
+        let Some((queue_i, piece_state)) = download_queue
             .iter_mut()
-            .find(|s| s.piece_i == block.index)
-            .unwrap_or_else(|| {
-                todo!("create new state for piece if the size is less that MAX_PIECES_IN_PARALLEL");
-            });
+            .enumerate()
+            .find(|(_i, s)| s.piece_i == block.index)
+        else {
+            // if the piece isn't even something we want we ignore it
+            // TODO: we might aswell add a new PieceState to the download_queue if it's not full yet
+            // self.add_piece_to_queue();
+            // recursion not really ideal
+            return Ok(None);
+        };
 
         println!("got block");
         piece_state.update_state(block);
         if piece_state.bitfield.iter().all(|b| *b) {
             // we're done with this piece
-            piece_state.check_hash(&self.torrent);
-            piece_state.write_to_file(&mut self.file).await;
-            piece_state.update_db_entry(&self.db_conn).await;
+            let piece_state = download_queue.remove(queue_i).expect("Index exists.");
+            self.handle_piece(&piece_state).await?;
 
-            todo!(
-                "remove piece_state from download queue, I cannot do pop_front because it might be that the front one is slow and the last one finishes earlier"
-            );
-            // cannot do: states.pop_front();
-            // TODO: write block to file
-            todo!("write piece");
-
-            Some(piece_state.piece_i)
+            Ok(Some(piece_state.piece_i))
         } else {
-            None
+            Ok(None)
         }
+    }
+
+    // it checks the hash, updates the bitfield and writes the piece to the file
+    // if this fails somewhere, it should be fine since the piece will get picked up later again
+    async fn handle_piece(&mut self, piece_state: &PieceState) -> anyhow::Result<()> {
+        piece_state.check_hash(&self.torrent)?;
+        self.write_piece_to_file(piece_state).await?;
+
+        // we first calculate the new bitfield, then update it in the DB and lastly update the struct
+        // this is so if the DB fails, the struct is still in the old state
+        let mut new_bitfield = self.have.clone();
+        let piece_i = piece_state.piece_i as usize;
+        new_bitfield[piece_i] = true;
+        self.db_conn
+            .update_bitfields(&self.info_hash, new_bitfield)
+            .await?;
+        self.have[piece_i] = true;
+
+        Ok(())
+    }
+
+    async fn write_piece_to_file(&mut self, piece_state: &PieceState) -> anyhow::Result<()> {
+        let offset = piece_state.piece_i as u64 * self.torrent.info.piece_length as u64;
+        self.file
+            .seek(std::io::SeekFrom::Start(offset))
+            .await
+            .context("seeking offset in file")?;
+
+        let mut buf = piece_state.buf.as_slice();
+        self.file
+            .write_all_buf(&mut buf)
+            .await
+            .context("writing piece to file")?;
+
+        Ok(())
     }
 
     /// returns a block a peer requested
@@ -63,21 +98,15 @@ impl PieceState {
         self.bitfield.insert(block_i, true);
     }
 
-    fn check_hash(&self, torrent: &Torrent) {
+    fn check_hash(&self, torrent: &Torrent) -> Result<(), anyhow::Error> {
         let mut sha1 = Sha1::new();
         sha1.update(&self.buf);
         let hash: [u8; 20] = sha1.finalize().into();
         let torrent_hash = torrent.info.pieces.0[self.piece_i as usize];
         if hash != torrent_hash {
-            todo!("handle hash-mismatch error");
+            Err(anyhow::anyhow!("Hash Mismatch"))
+        } else {
+            Ok(())
         }
-    }
-
-    async fn write_to_file(&self, file: &mut File) {
-        todo!("write to file");
-    }
-
-    async fn update_db_entry(&self, db_conn: &Surreal<Db>) {
-        todo!("update db entry");
     }
 }
