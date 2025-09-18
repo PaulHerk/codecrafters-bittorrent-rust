@@ -36,6 +36,15 @@ pub enum ReqMessage {
     },
 }
 
+// Next-up:
+// - split it into ReqMessage and ResMessage (TODO: better naming)
+// - the ReqManager has access to all peers with a HashMap<PeerHash, mpsc::Sender<ResMessage>>
+// - allows to implement:
+//  - rarest-first-piece-selection
+//  - peer not shutting down if the queue is empty, rather the Manager sends the shuttdown to all peers
+//    (the peers have to send the shutdown back)
+//  - remove the has-broadcaster from peers, Manager handles this
+
 pub struct ReqManager {
     /// the output file
     file: File,
