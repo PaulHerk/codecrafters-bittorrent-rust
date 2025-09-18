@@ -5,11 +5,11 @@ I somehow found pretty big interest in peer-to-peer communication. I found a cha
 
 ## features (done / want to add)
 - [x] downloading a file from the peers of the tracker found in the .torrent file
-- [ ] seeding a file
-- [ ] storing the state of a file to disk so that you can stop a download and continue later
+- [ ] seeding a file (partially done if we're already connected to a peer and he asks for a block)
+- [x] storing the state of a file to disk so that you can stop a download and continue later
 - [ ] retrying if none of the peers seed (currently it just iters through the peer-list once and if no one's there, no file for you)
-- [ ] choking algorithm??? (probably not though)
-- [ ] CLI
+- [ ] choking algorithm
+- [ ] actually usable CLI or something
 
 ## current CLI usage
 "current" because I will probably change some of it since the CLI commands were from the original challenge and are more of a sort of guidance.
