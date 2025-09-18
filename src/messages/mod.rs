@@ -39,6 +39,20 @@ impl MessageAll {
             MessageAll::KeepAlive(payload) => payload.to_be_bytes(),
         }
     }
+    fn get_msg_type(&self) -> Option<MessageType> {
+        match self {
+            MessageAll::Choke(_) => Some(MessageType::Choke),
+            MessageAll::Unchoke(_) => Some(MessageType::Unchoke),
+            MessageAll::Interested(_) => Some(MessageType::Interested),
+            MessageAll::NotInterested(_) => Some(MessageType::NotInterested),
+            MessageAll::Have(_) => Some(MessageType::Have),
+            MessageAll::Bitfield(_) => Some(MessageType::Bitfield),
+            MessageAll::Request(_) => Some(MessageType::Request),
+            MessageAll::Piece(_) => Some(MessageType::Piece),
+            MessageAll::Cancel(_) => Some(MessageType::Cancel),
+            MessageAll::KeepAlive(_) => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize_repr)]
@@ -71,18 +85,7 @@ impl Message {
     }
     /// returns None if it's a keep alive message
     pub fn get_msg_type(&self) -> Option<MessageType> {
-        match self.payload {
-            MessageAll::Choke(_) => Some(MessageType::Choke),
-            MessageAll::Unchoke(_) => Some(MessageType::Unchoke),
-            MessageAll::Interested(_) => Some(MessageType::Interested),
-            MessageAll::NotInterested(_) => Some(MessageType::NotInterested),
-            MessageAll::Have(_) => Some(MessageType::Have),
-            MessageAll::Bitfield(_) => Some(MessageType::Bitfield),
-            MessageAll::Request(_) => Some(MessageType::Request),
-            MessageAll::Piece(_) => Some(MessageType::Piece),
-            MessageAll::Cancel(_) => Some(MessageType::Cancel),
-            MessageAll::KeepAlive(_) => None,
-        }
+        self.payload.get_msg_type()
     }
 }
 
