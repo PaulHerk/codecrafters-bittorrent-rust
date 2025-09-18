@@ -175,8 +175,8 @@ impl Peer {
                                     tx,
                                 };
                                 manager_tx.send(msg).await?;
-                                let block = rx.await;
-                                if let Ok(response_piece_payload) = block {
+                                let block = rx.await?;
+                                if let Some(response_piece_payload) = block {
                                     peer_writer
                                         .send(Message::new(MessageAll::Piece(
                                             response_piece_payload,

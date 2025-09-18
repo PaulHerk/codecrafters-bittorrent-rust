@@ -29,7 +29,7 @@ pub enum ReqMessage {
     },
     NeedBlock {
         block: RequestPiecePayload,
-        tx: oneshot::Sender<ResponsePiecePayload>,
+        tx: oneshot::Sender<Option<ResponsePiecePayload>>,
     },
     WhatDoWeHave {
         tx: oneshot::Sender<Vec<bool>>,

@@ -77,8 +77,23 @@ impl ReqManager {
     }
 
     /// returns a block a peer requested
-    pub(super) fn get_block(&self, req_payload: RequestPiecePayload) -> ResponsePiecePayload {
-        todo!()
+    pub(super) fn get_block(
+        &self,
+        req_payload: RequestPiecePayload,
+    ) -> Option<ResponsePiecePayload> {
+        let mut buf = vec![0_u8; req_payload.length as usize];
+        let offset = req_payload.index as u64 * self.torrent.info.piece_length as u64
+            + req_payload.begin as u64;
+        if self.file.read_exact_at(&mut buf, offset).is_err() {
+            return None;
+        }
+
+        let res = ResponsePiecePayload {
+            index: req_payload.index,
+            begin: req_payload.begin,
+            block: buf,
+        };
+        Some(res)
     }
 }
 
