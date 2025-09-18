@@ -10,7 +10,7 @@ use crate::{
 pub mod payloads;
 
 #[derive(Debug, Clone)]
-pub enum MessageAll {
+pub enum PeerMessage {
     Choke(NoPayload),
     Unchoke(NoPayload),
     Interested(NoPayload),
@@ -24,33 +24,33 @@ pub enum MessageAll {
     KeepAlive(NoPayload),
 }
 
-impl MessageAll {
+impl PeerMessage {
     pub fn to_be_bytes(&self) -> Vec<u8> {
         match self {
-            MessageAll::Choke(payload) => payload.to_be_bytes(),
-            MessageAll::Unchoke(payload) => payload.to_be_bytes(),
-            MessageAll::Interested(payload) => payload.to_be_bytes(),
-            MessageAll::NotInterested(payload) => payload.to_be_bytes(),
-            MessageAll::Have(payload) => payload.to_be_bytes(),
-            MessageAll::Bitfield(payload) => payload.to_be_bytes(),
-            MessageAll::Request(payload) => payload.to_be_bytes(),
-            MessageAll::Piece(payload) => payload.to_be_bytes(),
-            MessageAll::Cancel(payload) => payload.to_be_bytes(),
-            MessageAll::KeepAlive(payload) => payload.to_be_bytes(),
+            PeerMessage::Choke(payload) => payload.to_be_bytes(),
+            PeerMessage::Unchoke(payload) => payload.to_be_bytes(),
+            PeerMessage::Interested(payload) => payload.to_be_bytes(),
+            PeerMessage::NotInterested(payload) => payload.to_be_bytes(),
+            PeerMessage::Have(payload) => payload.to_be_bytes(),
+            PeerMessage::Bitfield(payload) => payload.to_be_bytes(),
+            PeerMessage::Request(payload) => payload.to_be_bytes(),
+            PeerMessage::Piece(payload) => payload.to_be_bytes(),
+            PeerMessage::Cancel(payload) => payload.to_be_bytes(),
+            PeerMessage::KeepAlive(payload) => payload.to_be_bytes(),
         }
     }
     fn get_msg_type(&self) -> Option<MessageType> {
         match self {
-            MessageAll::Choke(_) => Some(MessageType::Choke),
-            MessageAll::Unchoke(_) => Some(MessageType::Unchoke),
-            MessageAll::Interested(_) => Some(MessageType::Interested),
-            MessageAll::NotInterested(_) => Some(MessageType::NotInterested),
-            MessageAll::Have(_) => Some(MessageType::Have),
-            MessageAll::Bitfield(_) => Some(MessageType::Bitfield),
-            MessageAll::Request(_) => Some(MessageType::Request),
-            MessageAll::Piece(_) => Some(MessageType::Piece),
-            MessageAll::Cancel(_) => Some(MessageType::Cancel),
-            MessageAll::KeepAlive(_) => None,
+            PeerMessage::Choke(_) => Some(MessageType::Choke),
+            PeerMessage::Unchoke(_) => Some(MessageType::Unchoke),
+            PeerMessage::Interested(_) => Some(MessageType::Interested),
+            PeerMessage::NotInterested(_) => Some(MessageType::NotInterested),
+            PeerMessage::Have(_) => Some(MessageType::Have),
+            PeerMessage::Bitfield(_) => Some(MessageType::Bitfield),
+            PeerMessage::Request(_) => Some(MessageType::Request),
+            PeerMessage::Piece(_) => Some(MessageType::Piece),
+            PeerMessage::Cancel(_) => Some(MessageType::Cancel),
+            PeerMessage::KeepAlive(_) => None,
         }
     }
 }
@@ -69,32 +69,12 @@ pub enum MessageType {
     Cancel = 8,
 }
 
-#[derive(Debug, Clone)]
-pub struct Message {
-    /// the length_prefix of the message which includes the message type + payload length
-    pub length: u32,
-    pub payload: MessageAll,
-}
-
-impl Message {
-    pub fn new(payload: MessageAll) -> Self {
-        Self {
-            length: payload.to_be_bytes().len() as u32 + 4, // I don't like that it gets converted to bytes first which gets discarded and when sent, its turned to bytes again
-            payload,
-        }
-    }
-    /// returns None if it's a keep alive message
-    pub fn get_msg_type(&self) -> Option<MessageType> {
-        self.payload.get_msg_type()
-    }
-}
-
 pub struct MessageFramer;
 
 const MAX: u32 = 8 * 1024 * 1024;
 
 impl Decoder for MessageFramer {
-    type Item = Message;
+    type Item = PeerMessage;
     type Error = std::io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -113,10 +93,7 @@ impl Decoder for MessageFramer {
             // this is a keep alive message
             // discard it
             src.advance(4);
-            return Ok(Some(Message {
-                length: 0,
-                payload: MessageAll::KeepAlive(NoPayload),
-            }));
+            return Ok(Some(PeerMessage::KeepAlive(NoPayload)));
         }
 
         if src.len() < 5 {
@@ -155,24 +132,24 @@ impl Decoder for MessageFramer {
         src.advance(4 + data_length as usize);
 
         let payload = match serde_json::from_str::<MessageType>(&msg_type.to_string()) {
-            Ok(MessageType::Choke) => Ok::<_, std::io::Error>(MessageAll::Choke(NoPayload)),
-            Ok(MessageType::Unchoke) => Ok(MessageAll::Unchoke(NoPayload)),
-            Ok(MessageType::Interested) => Ok(MessageAll::Interested(NoPayload)),
-            Ok(MessageType::NotInterested) => Ok(MessageAll::NotInterested(NoPayload)),
-            Ok(MessageType::Have) => Ok(MessageAll::Have(HavePayload::from_be_bytes(data))),
+            Ok(MessageType::Choke) => Ok::<_, std::io::Error>(PeerMessage::Choke(NoPayload)),
+            Ok(MessageType::Unchoke) => Ok(PeerMessage::Unchoke(NoPayload)),
+            Ok(MessageType::Interested) => Ok(PeerMessage::Interested(NoPayload)),
+            Ok(MessageType::NotInterested) => Ok(PeerMessage::NotInterested(NoPayload)),
+            Ok(MessageType::Have) => Ok(PeerMessage::Have(HavePayload::from_be_bytes(data))),
 
             Ok(MessageType::Bitfield) => {
-                Ok(MessageAll::Bitfield(BitfieldPayload::from_be_bytes(data)))
+                Ok(PeerMessage::Bitfield(BitfieldPayload::from_be_bytes(data)))
             }
-            Ok(MessageType::Request) => Ok(MessageAll::Request(
+            Ok(MessageType::Request) => Ok(PeerMessage::Request(
                 RequestPiecePayload::from_be_bytes(data),
             )),
-            Ok(MessageType::Piece) => {
-                Ok(MessageAll::Piece(ResponsePiecePayload::from_be_bytes(data)))
-            }
-            Ok(MessageType::Cancel) => {
-                Ok(MessageAll::Cancel(RequestPiecePayload::from_be_bytes(data)))
-            }
+            Ok(MessageType::Piece) => Ok(PeerMessage::Piece(ResponsePiecePayload::from_be_bytes(
+                data,
+            ))),
+            Ok(MessageType::Cancel) => Ok(PeerMessage::Cancel(RequestPiecePayload::from_be_bytes(
+                data,
+            ))),
             _ => {
                 // now theoretically we would panic here or some sort.
                 // however there are extensions with make use of different message types.
@@ -184,23 +161,23 @@ impl Decoder for MessageFramer {
                 return Ok(None);
             }
         };
-        Ok(Some(Message {
-            length: data_length,
-            payload: payload?,
-        }))
+        Ok(Some(payload?))
     }
 }
 
-impl Encoder<Message> for MessageFramer {
+impl Encoder<PeerMessage> for MessageFramer {
     type Error = std::io::Error;
 
-    fn encode(&mut self, item: Message, dst: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, item: PeerMessage, dst: &mut BytesMut) -> Result<(), Self::Error> {
         // Don't send a Message if it is longer than the other end will
         // accept.
-        if item.length > MAX {
+        let bytes = item.to_be_bytes();
+        // if it's a keep-alive message, it has a length of 0 but is discarded afterwards
+        let length = bytes.len() + 4;
+        if length as u32 > MAX {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("Frame of length {} is too large.", item.length),
+                format!("Frame of length {} is too large.", length),
             ));
         }
 
@@ -210,12 +187,12 @@ impl Encoder<Message> for MessageFramer {
         };
 
         // Reserve space in the buffer.
-        dst.reserve(item.length as usize);
+        dst.reserve(length);
 
         // Write the length and string to the buffer.
-        dst.extend_from_slice(&item.length.to_be_bytes());
+        dst.extend_from_slice(&length.to_be_bytes());
         dst.put_u8(msg_type as u8);
-        dst.extend_from_slice(item.payload.to_be_bytes().as_slice());
+        dst.extend_from_slice(&bytes);
         Ok(())
     }
 }

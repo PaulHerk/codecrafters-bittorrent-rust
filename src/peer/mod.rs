@@ -14,7 +14,7 @@ pub mod handshake;
 // pub mod peer_data;
 pub mod states;
 
-type PeerWriter = SplitSink<Framed<TcpStream, MessageFramer>, Message>;
+type PeerWriter = SplitSink<Framed<TcpStream, MessageFramer>, PeerMessage>;
 
 #[derive(Debug, Clone)]
 pub struct Peer {
@@ -35,7 +35,7 @@ pub struct Peer {
 enum Msg {
     /// this will be sent to other peers in order to announce that it has the piece
     ManagerMsg(PeerMsg),
-    Data(Message),
+    Data(PeerMessage),
     Timeout,
 }
 
@@ -132,32 +132,31 @@ impl Peer {
                         }
                         PeerMsg::Have(have_payload) => {
                             peer_writer
-                                .send(Message::new(MessageAll::Have(have_payload)))
+                                .send(PeerMessage::Have(have_payload))
                                 .await
                                 .context("send have")?;
                             eprintln!("sent have");
                         }
                     },
                     Msg::Data(message) => {
-                        match message.payload {
-                            MessageAll::Choke(_no_payload) => {
+                        match message {
+                            PeerMessage::Choke(_no_payload) => {
                                 self.peer_choking = true;
                                 return Err(anyhow::anyhow!("peer is choked"));
                             }
-                            MessageAll::Unchoke(_no_payload) => self.peer_choking = false,
-                            MessageAll::Interested(_no_payload) => self.peer_interested = true,
-                            MessageAll::NotInterested(_no_payload) => self.peer_interested = false,
-                            MessageAll::Have(have_payload) => {
+                            PeerMessage::Unchoke(_no_payload) => self.peer_choking = false,
+                            PeerMessage::Interested(_no_payload) => self.peer_interested = true,
+                            PeerMessage::NotInterested(_no_payload) => self.peer_interested = false,
+                            PeerMessage::Have(have_payload) => {
                                 self.has[have_payload.piece_index as usize] = true
                             }
-                            MessageAll::Bitfield(bitfield_payload) => {
+                            PeerMessage::Bitfield(bitfield_payload) => {
                                 self.has = bitfield_payload.pieces_available;
                                 self.update_req_queue(&manager_tx).await?;
                                 // TODO: we're interested by default for now
 
                                 if self.req_queue.is_some() {
-                                    let interested_msg: Message =
-                                        Message::new(MessageAll::Interested(NoPayload));
+                                    let interested_msg = PeerMessage::Interested(NoPayload);
                                     peer_writer
                                         .send(interested_msg)
                                         .await
@@ -167,7 +166,7 @@ impl Peer {
 
                                 self.am_interested = true;
                             }
-                            MessageAll::Request(request_piece_payload) => {
+                            PeerMessage::Request(request_piece_payload) => {
                                 let (tx, rx) = oneshot::channel();
 
                                 let msg = ReqMessage::NeedBlock {
@@ -178,9 +177,7 @@ impl Peer {
                                 let block = rx.await?;
                                 if let Some(response_piece_payload) = block {
                                     peer_writer
-                                        .send(Message::new(MessageAll::Piece(
-                                            response_piece_payload,
-                                        )))
+                                        .send(PeerMessage::Piece(response_piece_payload))
                                         .await
                                         .context("send response")?;
                                 } else {
@@ -189,7 +186,7 @@ impl Peer {
                                     // or: just an invalid request
                                 }
                             }
-                            MessageAll::Piece(response_piece_payload) => {
+                            PeerMessage::Piece(response_piece_payload) => {
                                 let msg = ReqMessage::GotBlock {
                                     block: response_piece_payload,
                                 };
@@ -197,15 +194,13 @@ impl Peer {
 
                                 self.req_next_block(&mut peer_writer, &manager_tx).await?;
                             }
-                            MessageAll::Cancel(_request_piece_payload) => todo!(), // only for extension, won't probably use it
-                            MessageAll::KeepAlive(_no_payload) => eprintln!("he sent a keep alive"),
+                            PeerMessage::Cancel(_request_piece_payload) => todo!(), // only for extension, won't probably use it
+                            PeerMessage::KeepAlive(_no_payload) => {
+                                eprintln!("he sent a keep alive")
+                            }
                         }
                     }
-                    Msg::Timeout => {
-                        peer_writer
-                            .send(Message::new(MessageAll::KeepAlive(NoPayload)))
-                            .await?
-                    }
+                    Msg::Timeout => peer_writer.send(PeerMessage::KeepAlive(NoPayload)).await?,
                 }
             } else {
                 eprintln!("peer disconnected");
@@ -232,7 +227,7 @@ impl Peer {
             *queue = rx.await?;
         }
         if let Some(req) = queue.pop() {
-            let req_msg = Message::new(MessageAll::Request(req));
+            let req_msg = PeerMessage::Request(req);
             peer_writer.send(req_msg).await.context("Writing req")?;
         } else {
             // TODO: set interested to false
