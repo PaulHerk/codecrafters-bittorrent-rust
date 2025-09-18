@@ -27,7 +27,7 @@ pub struct Peer {
     pub peer_interested: bool,
     /// the bitfield of the other peer
     pub has: Vec<bool>,
-    pub req_queue: Option<Vec<RequestPiecePayload>>,
+    pub req_queue: Vec<RequestPiecePayload>,
 }
 
 /// this enum is used to select between different stream-types a peer can receive
@@ -50,7 +50,7 @@ impl Peer {
             peer_choking: true,
             peer_interested: false,
             has: Vec::new(),
-            req_queue: None,
+            req_queue: Vec::new(),
         }
     }
     /// info_hash: the info hash of the torrent
@@ -155,7 +155,7 @@ impl Peer {
                                 self.update_req_queue(&manager_tx).await?;
                                 // TODO: we're interested by default for now
 
-                                if self.req_queue.is_some() {
+                                if !self.req_queue.is_empty() {
                                     let interested_msg = PeerMessage::Interested(NoPayload);
                                     peer_writer
                                         .send(interested_msg)
@@ -214,23 +214,20 @@ impl Peer {
         peer_writer: &mut PeerWriter,
         manager_tx: &mpsc::Sender<ReqMessage>,
     ) -> anyhow::Result<()> {
-        let Some(queue) = &mut self.req_queue else {
-            return Ok(());
-        };
-        if queue.is_empty() {
-            let (tx, rx) = oneshot::channel();
-            let msg = ReqMessage::NeedBlocksToReq {
-                peer_has: self.has.clone(),
-                tx,
-            };
-            manager_tx.send(msg).await?;
-            *queue = rx.await?;
+        if self.req_queue.is_empty() {
+            self.update_req_queue(manager_tx).await?;
         }
-        if let Some(req) = queue.pop() {
+        if let Some(req) = self.req_queue.pop() {
             let req_msg = PeerMessage::Request(req);
             peer_writer.send(req_msg).await.context("Writing req")?;
         } else {
-            // TODO: set interested to false
+            // set interested to false
+            let not_interested_msg = PeerMessage::NotInterested(NoPayload);
+            peer_writer
+                .send(not_interested_msg)
+                .await
+                .context("Writing not interested msg")?;
+            self.am_interested = false;
         }
 
         Ok(())
@@ -249,7 +246,7 @@ impl Peer {
     async fn get_new_req_queue(
         &self,
         manager_tx: &mpsc::Sender<ReqMessage>,
-    ) -> anyhow::Result<Option<Vec<RequestPiecePayload>>> {
+    ) -> anyhow::Result<Vec<RequestPiecePayload>> {
         let (tx, rx) = oneshot::channel();
         let req = ReqMessage::NeedBlocksToReq {
             peer_has: self.has.clone(),
@@ -259,10 +256,9 @@ impl Peer {
 
         let res = rx.await;
         if let Ok(res) = res {
-            Ok(Some(res))
+            Ok(res)
         } else {
-            // sever the connection
-            Ok(None)
+            Ok(vec![])
         }
     }
 

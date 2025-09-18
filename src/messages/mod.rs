@@ -15,7 +15,6 @@ pub enum PeerMessage {
     Unchoke(NoPayload),
     Interested(NoPayload),
     NotInterested(NoPayload),
-    /// TODO: The 'have' message's payload is a single number, the index which that downloader just completed and checked the hash of.
     Have(HavePayload),
     Bitfield(BitfieldPayload),
     Request(RequestPiecePayload),
