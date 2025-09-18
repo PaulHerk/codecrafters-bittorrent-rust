@@ -128,7 +128,9 @@ impl Peer {
                 match message {
                     Msg::ManagerMsg(peer_msg) => match peer_msg {
                         PeerMsg::Shutdown => {
-                            todo!("shutdown peer")
+                            if self.sever_conn(&mut peer_writer).await {
+                                break Ok(());
+                            }
                         }
                         PeerMsg::Have(have_payload) => {
                             peer_writer
@@ -262,7 +264,15 @@ impl Peer {
         }
     }
 
-    async fn sever_conn(&mut self) {
-        todo!()
+    async fn sever_conn(&mut self, peer_writer: &mut PeerWriter) -> bool {
+        if self.peer_interested || self.am_interested {
+            return false;
+        }
+
+        if peer_writer.close().await.is_err() {
+            false
+        } else {
+            true
+        }
     }
 }
