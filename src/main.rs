@@ -153,12 +153,12 @@ async fn main() -> anyhow::Result<()> {
 
             for peer in response.peers.0.iter() {
                 let mut peer = Peer::new(*PEER_ID, *peer);
-                let Ok(framed) = peer.shake_hands_get_framed(&info_hash).await else {
-                    continue;
-                };
                 let has_receiver = broadcast_tx.subscribe();
                 let req_manager_tx = req_manager_tx.clone();
                 tokio::spawn(async move {
+                    let Ok(framed) = peer.shake_hands_get_framed(&info_hash).await else {
+                        return;
+                    };
                     peer.event_loop(framed, req_manager_tx, has_receiver)
                         .await
                         .unwrap();
