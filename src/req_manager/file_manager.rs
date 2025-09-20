@@ -39,7 +39,9 @@ impl ReqManager {
             // we're done with this piece
             let piece_state = download_queue.remove(queue_i).expect("Index exists.");
             self.handle_piece(&piece_state).await?;
+            self.inform_peers(piece_state.piece_i).await?;
 
+            self.handle_finish().await?;
             Ok(Some(piece_state.piece_i))
         } else {
             Ok(None)
@@ -94,6 +96,33 @@ impl ReqManager {
             block: buf,
         };
         Some(res)
+    }
+
+    async fn inform_peers(&self, piece_i: u32) -> anyhow::Result<()> {
+        for (_peer_id, conn) in self.peers.iter() {
+            conn.sender
+                .send(super::ResMessage::FinishedPiece(piece_i))
+                .await
+                .context("informing peer that we've finished piece")?;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_finish(&mut self) -> anyhow::Result<()> {
+        if !self.have.iter().all(|b| *b) {
+            Ok(())
+        } else {
+            self.download_queue = None;
+            for (_peer_id, conn) in self.peers.iter() {
+                conn.sender
+                    .send(super::ResMessage::FinishedFile)
+                    .await
+                    .context("informing peer that we're done")?;
+            }
+
+            Ok(())
+        }
     }
 }
 

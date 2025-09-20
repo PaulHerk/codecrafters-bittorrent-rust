@@ -16,7 +16,7 @@ pub mod states;
 
 type PeerWriter = SplitSink<Framed<TcpStream, MessageFramer>, PeerMessage>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Peer {
     pub peer_id: [u8; 20],
     pub addr: SocketAddrV4,
@@ -28,19 +28,24 @@ pub struct Peer {
     /// the bitfield of the other peer
     pub has: Vec<bool>,
     pub req_queue: Vec<RequestPiecePayload>,
+    req_manager_tx: mpsc::Sender<ReqMsgFromPeer>,
 }
 
 /// this enum is used to select between different stream-types a peer can receive
 #[derive(Debug)]
 enum Msg {
     /// this will be sent to other peers in order to announce that it has the piece
-    ManagerMsg(PeerMsg),
+    ManagerMsg(ResMessage),
     Data(PeerMessage),
     Timeout,
 }
 
 impl Peer {
-    pub fn new(peer_id: [u8; 20], addr: SocketAddrV4) -> Self {
+    pub fn new(
+        peer_id: [u8; 20],
+        addr: SocketAddrV4,
+        req_manager_tx: mpsc::Sender<ReqMsgFromPeer>,
+    ) -> Self {
         Self {
             peer_id,
             addr,
@@ -51,6 +56,7 @@ impl Peer {
             peer_interested: false,
             has: Vec::new(),
             req_queue: Vec::new(),
+            req_manager_tx,
         }
     }
     /// info_hash: the info hash of the torrent
@@ -81,14 +87,17 @@ impl Peer {
         Ok(framed)
     }
 
-    pub async fn event_loop(
-        &mut self,
-        framed: MsgFrameType,
-        manager_tx: mpsc::Sender<ReqMessage>,
-        // used for sending have messages to the peer
-        has_receiver: tokio::sync::broadcast::Receiver<PeerMsg>,
-    ) -> anyhow::Result<()> {
+    pub async fn event_loop(&mut self, framed: MsgFrameType) -> anyhow::Result<()> {
         assert_eq!(self.state, PeerState::DataTransfer);
+        let (tx, req_manager_rx) = mpsc::channel(8);
+        let peer_conn = PeerConn {
+            sender: tx,
+            has: Vec::new(),
+        };
+        self.send_req_manager(ReqMessage::NewConnection((self.peer_id, peer_conn)))
+            .await
+            .context("sending new peer data to ReqManager.")?;
+
         // TODO: check if we are interested or not
         self.am_choking = false;
 
@@ -103,8 +112,9 @@ impl Peer {
         tokio::pin!(peer_msg_stream);
 
         // this is the stream sent by other connections to peers to send have messages
-        let manager_stream = unfold(has_receiver, |mut rx| async move {
-            let Ok(msg) = rx.recv().await else {
+        // XXXXXX
+        let manager_stream = unfold(req_manager_rx, |mut rx| async move {
+            let Some(msg) = rx.recv().await else {
                 return None;
             };
             Some((Msg::ManagerMsg(msg), rx))
@@ -123,22 +133,30 @@ impl Peer {
 
         let mut stream =
             futures_util::stream_select!(peer_msg_stream, manager_stream, timeout_stream);
+        let mut has_sent_req = false;
         loop {
             if let Some(message) = stream.next().await {
                 match message {
                     Msg::ManagerMsg(peer_msg) => match peer_msg {
-                        PeerMsg::Shutdown => {
+                        ResMessage::FinishedFile => {
+                            // TODO: set flags
                             if self.sever_conn(&mut peer_writer).await {
                                 break Ok(());
                             }
                         }
-                        PeerMsg::Have(have_payload) => {
+                        ResMessage::FinishedPiece(piece_index) => {
+                            let have_payload = HavePayload { piece_index };
                             peer_writer
                                 .send(PeerMessage::Have(have_payload))
                                 .await
                                 .context("send have")?;
                             eprintln!("sent have");
                         }
+                        ResMessage::NewBlockQueue(request_piece_payloads) => todo!(
+                            "if it's empty prolly should set interested to false and vice-versa"
+                        ),
+                        ResMessage::Block(response_piece_payload) => todo!("send block"),
+                        ResMessage::WeHave(items) => todo!("send bitfield"),
                     },
                     Msg::Data(message) => {
                         match message {
@@ -154,51 +172,62 @@ impl Peer {
                             }
                             PeerMessage::Bitfield(bitfield_payload) => {
                                 self.has = bitfield_payload.pieces_available;
-                                self.update_req_queue(&manager_tx).await?;
+                                self.send_req_manager(ReqMessage::PeerHas(self.has.clone()))
+                                    .await
+                                    .context("sending bitfield to ReqManager")?;
+                                self.update_req_queue().await?;
                                 // TODO: we're interested by default for now
 
-                                if !self.req_queue.is_empty() {
-                                    let interested_msg = PeerMessage::Interested(NoPayload);
-                                    peer_writer
-                                        .send(interested_msg)
-                                        .await
-                                        .context("write interested frame")?;
-                                    self.req_next_block(&mut peer_writer, &manager_tx).await?;
-                                }
+                                // TODO: put that up since this will always be false
+                                // if !self.req_queue.is_empty() {
+                                //     let interested_msg = PeerMessage::Interested(NoPayload);
+                                //     peer_writer
+                                //         .send(interested_msg)
+                                //         .await
+                                //         .context("write interested frame")?;
+                                //     self.req_next_block(&mut peer_writer).await?;
+                                // }
 
                                 self.am_interested = true;
                             }
                             PeerMessage::Request(request_piece_payload) => {
-                                let (tx, rx) = oneshot::channel();
+                                self.send_req_manager(ReqMessage::NeedBlock(request_piece_payload))
+                                    .await
+                                    .context("requesting ReqManager for block")?;
 
-                                let msg = ReqMessage::NeedBlock {
-                                    block: request_piece_payload,
-                                    tx,
-                                };
-                                manager_tx.send(msg).await?;
-                                let block = rx.await?;
-                                if let Some(response_piece_payload) = block {
-                                    peer_writer
-                                        .send(PeerMessage::Piece(response_piece_payload))
-                                        .await
-                                        .context("send response")?;
-                                } else {
-                                    // TODO: I'm not sure if we should send something if the peer sent us a request for
-                                    // either: a piece that we don't have
-                                    // or: just an invalid request
-                                }
+                                // TODO: move that up
+                                // if let Some(response_piece_payload) = block {
+                                //     peer_writer
+                                //         .send(PeerMessage::Piece(response_piece_payload))
+                                //         .await
+                                //         .context("send response")?;
+                                // } else {
+                                //     // TODO: I'm not sure if we should send something if the peer sent us a request for
+                                //     // either: a piece that we don't have
+                                //     // or: just an invalid request
+                                // }
                             }
                             PeerMessage::Piece(response_piece_payload) => {
-                                let msg = ReqMessage::GotBlock {
-                                    block: response_piece_payload,
-                                };
-                                manager_tx.send(msg).await?;
-
-                                self.req_next_block(&mut peer_writer, &manager_tx).await?;
+                                self.send_req_manager(ReqMessage::GotBlock(response_piece_payload))
+                                    .await
+                                    .context("sending that we got block to ReqManager")?;
+                                has_sent_req = false;
                             }
                             PeerMessage::Cancel(_request_piece_payload) => todo!(), // only for extension, won't probably use it
                             PeerMessage::KeepAlive(_no_payload) => {
                                 eprintln!("he sent a keep alive")
+                            }
+                        }
+                        // request next block
+                        if !has_sent_req && self.am_interested && !self.peer_choking {
+                            self.req_next_block(&mut peer_writer)
+                                .await
+                                .context("requesting block")?;
+                            has_sent_req = true;
+
+                            // keep the queue always full
+                            if self.req_queue.len() < 3 {
+                                self.update_req_queue().await?;
                             }
                         }
                     }
@@ -211,57 +240,34 @@ impl Peer {
         }
     }
 
-    async fn req_next_block(
-        &mut self,
-        peer_writer: &mut PeerWriter,
-        manager_tx: &mpsc::Sender<ReqMessage>,
-    ) -> anyhow::Result<()> {
+    async fn send_req_manager(
+        &self,
+        msg: ReqMessage,
+    ) -> Result<(), mpsc::error::SendError<ReqMsgFromPeer>> {
+        self.req_manager_tx
+            .send(ReqMsgFromPeer {
+                peer_id: self.peer_id,
+                msg,
+            })
+            .await
+    }
+
+    async fn req_next_block(&mut self, peer_writer: &mut PeerWriter) -> anyhow::Result<()> {
         if self.req_queue.is_empty() {
-            self.update_req_queue(manager_tx).await?;
-        }
-        if let Some(req) = self.req_queue.pop() {
+            return self.update_req_queue().await;
+        } else if let Some(req) = self.req_queue.pop() {
             let req_msg = PeerMessage::Request(req);
             peer_writer.send(req_msg).await.context("Writing req")?;
-        } else {
-            // set interested to false
-            let not_interested_msg = PeerMessage::NotInterested(NoPayload);
-            peer_writer
-                .send(not_interested_msg)
-                .await
-                .context("Writing not interested msg")?;
-            self.am_interested = false;
         }
 
         Ok(())
     }
 
-    async fn update_req_queue(
-        &mut self,
-        manager_tx: &mpsc::Sender<ReqMessage>,
-    ) -> anyhow::Result<()> {
-        let new_queue = self.get_new_req_queue(&manager_tx).await?;
-        self.req_queue = new_queue;
-
+    async fn update_req_queue(&mut self) -> anyhow::Result<()> {
+        self.send_req_manager(ReqMessage::NeedBlockQueue)
+            .await
+            .context("asking for new block-queue")?;
         Ok(())
-    }
-
-    async fn get_new_req_queue(
-        &self,
-        manager_tx: &mpsc::Sender<ReqMessage>,
-    ) -> anyhow::Result<Vec<RequestPiecePayload>> {
-        let (tx, rx) = oneshot::channel();
-        let req = ReqMessage::NeedBlocksToReq {
-            peer_has: self.has.clone(),
-            tx,
-        };
-        manager_tx.send(req).await?;
-
-        let res = rx.await;
-        if let Ok(res) = res {
-            Ok(res)
-        } else {
-            Ok(vec![])
-        }
     }
 
     async fn sever_conn(&mut self, peer_writer: &mut PeerWriter) -> bool {

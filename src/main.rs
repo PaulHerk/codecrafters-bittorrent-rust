@@ -4,6 +4,7 @@ use codecrafters_bittorrent::*;
 use reqwest::Url;
 use std::net::SocketAddrV4;
 use std::path::PathBuf;
+use tokio::sync::mpsc;
 
 const PEER_ID: &[u8; 20] = b"-AZ2060-222222222222";
 const PEER_PORT: u16 = 6881;
@@ -77,7 +78,8 @@ async fn main() -> anyhow::Result<()> {
         }
         DecodeMetadataType::Handshake { torrent, addr } => {
             let torrent = Torrent::read_from_file(torrent)?;
-            let mut peer = Peer::new(*PEER_ID, *addr);
+            let (tx, _rx) = mpsc::channel(1);
+            let mut peer = Peer::new(*PEER_ID, *addr, tx);
             let _framed = peer
                 .shake_hands_get_framed(&torrent.info_hash())
                 .await
@@ -131,16 +133,10 @@ async fn main() -> anyhow::Result<()> {
             output,
             torrent: torrent_path,
         } => {
-            let (broadcast_tx, _broadcast_rx) = tokio::sync::broadcast::channel::<PeerMsg>(10);
-            let (req_manager_tx, req_manager_rx) = tokio::sync::mpsc::channel::<ReqMessage>(10);
+            let (req_manager_tx, req_manager_rx) = mpsc::channel(10);
 
-            let mut req_manager = ReqManager::init(
-                req_manager_rx,
-                broadcast_tx.clone(),
-                output.clone(),
-                torrent_path.clone(),
-            )
-            .await?;
+            let mut req_manager =
+                ReqManager::init(req_manager_rx, output.clone(), torrent_path.clone()).await?;
 
             let torrent = &req_manager.torrent;
 
@@ -152,16 +148,12 @@ async fn main() -> anyhow::Result<()> {
             });
 
             for peer in response.peers.0.iter() {
-                let mut peer = Peer::new(*PEER_ID, *peer);
-                let has_receiver = broadcast_tx.subscribe();
-                let req_manager_tx = req_manager_tx.clone();
+                let mut peer = Peer::new(*PEER_ID, *peer, req_manager_tx.clone());
                 tokio::spawn(async move {
                     let Ok(framed) = peer.shake_hands_get_framed(&info_hash).await else {
                         return;
                     };
-                    peer.event_loop(framed, req_manager_tx, has_receiver)
-                        .await
-                        .unwrap();
+                    peer.event_loop(framed).await.unwrap();
                 });
             }
 
