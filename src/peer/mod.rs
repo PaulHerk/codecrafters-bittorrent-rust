@@ -32,7 +32,7 @@ pub struct Peer {
 }
 
 /// this enum is used to select between different stream-types a peer can receive
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum Msg {
     /// this will be sent to other peers in order to announce that it has the piece
     ManagerMsg(ResMessage),
@@ -132,14 +132,18 @@ impl Peer {
 
         let mut stream =
             futures_util::stream_select!(peer_msg_stream, manager_stream, timeout_stream);
-        let mut have_sent_req = false;
+        let mut waiting_for_piece = false;
 
         // ask req_manager what we have
-        // self.send_req_manager(ReqMessage::WhatDoWeHave)
-        //     .await
-        //     .context("asking for our bitfield")?;
+        self.send_req_manager(ReqMessage::WhatDoWeHave)
+            .await
+            .context("asking for our bitfield")?;
         loop {
             if let Some(message) = stream.next().await {
+                if let Msg::Data(PeerMessage::Piece(_)) = message {
+                } else {
+                    // dbg!(&message);
+                }
                 match message {
                     Msg::ManagerMsg(peer_msg) => match peer_msg {
                         ResMessage::FinishedFile => {
@@ -155,7 +159,6 @@ impl Peer {
                                 .send(PeerMessage::Have(have_payload))
                                 .await
                                 .context("send have")?;
-                            eprintln!("sent have");
                         }
                         ResMessage::NewBlockQueue(request_piece_payloads) => {
                             self.req_queue.extend_from_slice(&request_piece_payloads);
@@ -164,7 +167,6 @@ impl Peer {
                             } else {
                                 self.set_interested(&mut peer_writer, true).await?;
                             };
-                            dbg!(&self.req_queue);
                         }
                         ResMessage::Block(response_piece_payload) => {
                             if let Some(payload) = response_piece_payload {
@@ -177,7 +179,7 @@ impl Peer {
                         }
                         ResMessage::WeHave(bitfield) => {
                             // later TODO: implement lazy bitfield?
-                            if !bitfield.is_empty() {
+                            if !bitfield.is_nothing() {
                                 peer_writer
                                     .send(PeerMessage::Bitfield(bitfield))
                                     .await
@@ -189,20 +191,26 @@ impl Peer {
                         match message {
                             PeerMessage::Choke(_no_payload) => {
                                 self.peer_choking = true;
-                                return Err(anyhow::anyhow!("peer is choked"));
+                                // return Err(anyhow::anyhow!("peer is choked"));
                             }
                             PeerMessage::Unchoke(_no_payload) => self.peer_choking = false,
                             PeerMessage::Interested(_no_payload) => self.peer_interested = true,
                             PeerMessage::NotInterested(_no_payload) => self.peer_interested = false,
                             PeerMessage::Have(have_payload) => {
-                                self.has[have_payload.piece_index as usize] = true
+                                self.has[have_payload.piece_index as usize] = true;
+
+                                self.send_req_manager(ReqMessage::PeerHas(have_payload))
+                                    .await
+                                    .context("sending have message to ReqManager")?;
                             }
                             PeerMessage::Bitfield(bitfield_payload) => {
                                 self.has = bitfield_payload.pieces_available.clone();
-                                self.send_req_manager(ReqMessage::PeerHas(bitfield_payload))
+                                self.send_req_manager(ReqMessage::PeerBitfield(bitfield_payload))
                                     .await
                                     .context("sending bitfield to ReqManager")?;
-                                self.update_req_queue().await?;
+                                // TODO: we might want to do it more efficient than requesting the whole queue
+                                // this currently starts the whole loop by setting the interested flag eventually
+                                self.req_next_block(&mut peer_writer).await?;
                             }
                             PeerMessage::Request(request_piece_payload) => {
                                 self.send_req_manager(ReqMessage::NeedBlock(request_piece_payload))
@@ -210,10 +218,14 @@ impl Peer {
                                     .context("requesting ReqManager for block")?;
                             }
                             PeerMessage::Piece(response_piece_payload) => {
+                                eprintln!(
+                                    "got {}th block in piece {}",
+                                    response_piece_payload.begin, response_piece_payload.index
+                                );
                                 self.send_req_manager(ReqMessage::GotBlock(response_piece_payload))
                                     .await
                                     .context("sending that we got block to ReqManager")?;
-                                have_sent_req = false;
+                                waiting_for_piece = false;
                             }
                             PeerMessage::Cancel(_request_piece_payload) => todo!(), // only for extension, won't probably use it
                             PeerMessage::KeepAlive(_no_payload) => {
@@ -223,18 +235,20 @@ impl Peer {
                     }
                     Msg::Timeout => peer_writer.send(PeerMessage::KeepAlive(NoPayload)).await?,
                 }
+
+                // request next block
+                if !waiting_for_piece && self.am_interested && !self.peer_choking {
+                    if self
+                        .req_next_block(&mut peer_writer)
+                        .await
+                        .context("requesting block")?
+                    {
+                        waiting_for_piece = true;
+                    }
+                }
             } else {
                 eprintln!("peer disconnected");
                 break Err(anyhow::anyhow!("peer disconnected"));
-            }
-
-            // request next block
-            if !have_sent_req && self.am_interested && !self.peer_choking {
-                dbg!("requesting block");
-                self.req_next_block(&mut peer_writer)
-                    .await
-                    .context("requesting block")?;
-                have_sent_req = true;
             }
         }
     }
@@ -257,7 +271,7 @@ impl Peer {
         peer_writer: &mut PeerWriter,
         interested: bool,
     ) -> anyhow::Result<()> {
-        if interested == self.peer_interested {
+        if interested == self.am_interested {
             return Ok(());
         }
         self.am_interested = interested;
@@ -290,24 +304,17 @@ impl Peer {
         Ok(())
     }
 
-    async fn req_next_block(&mut self, peer_writer: &mut PeerWriter) -> anyhow::Result<()> {
-        if self.req_queue.is_empty() {
-            dbg!("actually not");
-            return self.update_req_queue().await;
-        } else if let Some(req) = self.req_queue.pop() {
+    async fn req_next_block(&mut self, peer_writer: &mut PeerWriter) -> anyhow::Result<bool> {
+        if let Some(req) = self.req_queue.pop() {
             let req_msg = PeerMessage::Request(req);
             peer_writer.send(req_msg).await.context("Writing req")?;
-            eprintln!("sent req");
+            Ok(true)
+        } else {
+            self.send_req_manager(ReqMessage::NeedBlockQueue)
+                .await
+                .context("asking for new block-queue")?;
+            Ok(false)
         }
-
-        Ok(())
-    }
-
-    async fn update_req_queue(&mut self) -> anyhow::Result<()> {
-        self.send_req_manager(ReqMessage::NeedBlockQueue)
-            .await
-            .context("asking for new block-queue")?;
-        Ok(())
     }
 
     async fn sever_conn(&mut self, peer_writer: &mut PeerWriter) -> bool {

@@ -90,6 +90,7 @@ impl Torrent {
         if let Some(length) = self.info.length {
             length
         } else {
+            dbg!(&self);
             todo!()
         }
     }

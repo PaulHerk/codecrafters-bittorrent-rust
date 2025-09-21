@@ -4,13 +4,13 @@ pub trait Payload {
     fn to_be_bytes(&self) -> Vec<u8>;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BitfieldPayload {
     /// a bitfield with each index that downloader has sent set to one and the rest set to zero
     pub pieces_available: Vec<bool>,
 }
 impl BitfieldPayload {
-    pub(crate) fn is_empty(&self) -> bool {
+    pub(crate) fn is_nothing(&self) -> bool {
         self.pieces_available.iter().all(|b| !*b)
     }
 
@@ -45,7 +45,7 @@ impl Payload for BitfieldPayload {
     }
 }
 
-#[derive(Debug, Clone, Copy, bincode::Encode, bincode::Decode)]
+#[derive(Debug, Clone, Copy, bincode::Encode, bincode::Decode, PartialEq)]
 pub struct RequestPiecePayload {
     /// the index of the piece
     pub index: u32,
@@ -78,7 +78,7 @@ impl Payload for RequestPiecePayload {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ResponsePiecePayload {
     pub index: u32,
     pub begin: u32,
@@ -106,7 +106,7 @@ impl Payload for ResponsePiecePayload {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HavePayload {
     /// a single number, the index which that downloader just completed and checked the hash of
     pub piece_index: u32,
@@ -129,7 +129,7 @@ impl Payload for HavePayload {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct NoPayload;
 impl Payload for NoPayload {
     fn from_be_bytes(_payload: &[u8]) -> Self {

@@ -24,12 +24,12 @@ impl ReqManager {
             let blocks_we_need = state.blocks.iter().filter(|b| b.is_none());
             // TODO: now currently if there's only one block remaining in the queue, it will return only that one
             // we might want to return that plus like 9 more of the next piece
-            return peer_has_it && dbg!(blocks_we_need).count() >= 1;
+            peer_has_it && blocks_we_need.count() >= 1
         });
 
         // 2. If not, add something to the queue: realistically rarest-first
         if let None = piece_i {
-            if !dbg!(self.add_piece_to_queue(&peer_has)) {
+            if !self.add_piece_to_queue(&peer_has) {
                 return Vec::new();
             };
         }
@@ -57,6 +57,7 @@ impl ReqManager {
             .iter_mut()
             .enumerate()
             .filter(|(_, b)| b.is_none())
+            .take(n)
         {
             let block_i = block_i as u32;
             let index = piece.piece_i;

@@ -9,7 +9,7 @@ use crate::{
 };
 pub mod payloads;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PeerMessage {
     Choke(NoPayload),
     Unchoke(NoPayload),
@@ -172,7 +172,7 @@ impl Encoder<PeerMessage> for MessageFramer {
         // accept.
         let bytes = item.to_be_bytes();
         // if it's a keep-alive message, it has a length of 0 but is discarded afterwards
-        let length = bytes.len() + 4;
+        let length = bytes.len() + 1;
         if length as u32 > MAX {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -189,11 +189,10 @@ impl Encoder<PeerMessage> for MessageFramer {
         dst.reserve(length);
 
         // Write the length and string to the buffer.
-        dst.extend_from_slice(&length.to_be_bytes());
+        dst.put_u32(length as u32);
         dst.put_u8(msg_type as u8);
         dst.extend_from_slice(&bytes);
 
-        dbg!(&dst);
         Ok(())
     }
 }

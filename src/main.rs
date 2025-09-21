@@ -133,7 +133,7 @@ async fn main() -> anyhow::Result<()> {
             output,
             torrent: torrent_path,
         } => {
-            let (req_manager_tx, req_manager_rx) = mpsc::channel(10);
+            let (req_manager_tx, req_manager_rx) = mpsc::channel(64);
 
             let mut req_manager =
                 ReqManager::init(req_manager_rx, output.clone(), torrent_path.clone()).await?;

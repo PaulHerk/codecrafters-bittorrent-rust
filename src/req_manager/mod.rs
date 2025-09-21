@@ -7,7 +7,9 @@ use std::{
 use anyhow::Context;
 use tokio::sync::mpsc;
 
-use crate::{BitfieldPayload, DBConnection, RequestPiecePayload, ResponsePiecePayload, Torrent};
+use crate::{
+    BitfieldPayload, DBConnection, HavePayload, RequestPiecePayload, ResponsePiecePayload, Torrent,
+};
 
 mod file_manager;
 mod req_preparer;
@@ -20,7 +22,8 @@ pub(self) const MAX_PIECES_IN_PARALLEL: usize = 2;
 #[derive(Debug, Clone)]
 pub enum ReqMessage {
     NewConnection(PeerConn),
-    PeerHas(BitfieldPayload),
+    PeerBitfield(BitfieldPayload),
+    PeerHas(HavePayload),
     NeedBlockQueue,
     GotBlock(ResponsePiecePayload),
     NeedBlock(RequestPiecePayload),
@@ -45,7 +48,7 @@ pub struct ReqMsgFromPeer {
 //  - remove the has-broadcaster from peers, Manager handles this
 //  - choking: 4 active downloaders
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(super) enum ResMessage {
     NewBlockQueue(Vec<RequestPiecePayload>),
     Block(Option<ResponsePiecePayload>),
@@ -147,11 +150,11 @@ impl ReqManager {
                 continue;
             };
             match peer_msg.msg {
-                ReqMessage::NewConnection(_) => (
-                    // we already inserted it
-                ),
+                ReqMessage::NewConnection(peer_conn) => (
+                                // we already inserted it
+                            ),
                 ReqMessage::GotBlock(block) => {
-                    if let Some(piece_index) = dbg!(self.write_block(block).await)? {
+                    if let Some(piece_index) = self.write_block(block).await? {
                         self.peers
                             .get(&peer_msg.peer_id)
                             .expect("we checked that before")
@@ -181,7 +184,7 @@ impl ReqManager {
                     );
                     self.peers
                         .get(&peer_msg.peer_id)
-                        .expect("we checked that before")
+                        .expect("we checked that before, just need mutable reference again")
                         .sender
                         .send(ResMessage::NewBlockQueue(blocks))
                         .await
@@ -195,12 +198,19 @@ impl ReqManager {
                         .await
                         .context("send have")?;
                 }
-                ReqMessage::PeerHas(bitfield) => {
+                ReqMessage::PeerBitfield(bitfield) => {
                     let peers_mut = self
                         .peers
                         .get_mut(&peer_msg.peer_id)
                         .expect("we checked that before");
                     peers_mut.has = bitfield;
+                }
+                ReqMessage::PeerHas(have_payload) => {
+                    self.peers
+                        .get_mut(&peer_msg.peer_id)
+                        .expect("checked that")
+                        .has
+                        .pieces_available[have_payload.piece_index as usize] = true;
                 }
             }
         }

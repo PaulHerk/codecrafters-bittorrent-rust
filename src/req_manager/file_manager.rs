@@ -32,7 +32,6 @@ impl ReqManager {
             return Ok(None);
         };
 
-        println!("got block");
         piece_state.update_state(block);
         if piece_state.blocks.iter().all(|b| b.is_finished()) {
             println!("piece {} is done", piece_state.piece_i);
