@@ -179,7 +179,6 @@ impl ReqManager {
                         .send(ResMessage::NewBlockQueue(blocks))
                         .await
                         .context("sending block queue")?;
-                    todo!()
                 }
                 ReqMessage::WhatDoWeHave => {
                     peer.sender

@@ -1,7 +1,7 @@
 use futures_util::stream::{SplitSink, unfold};
 use futures_util::{self, SinkExt, StreamExt};
 use std::net::SocketAddrV4;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 use tokio_util::codec::Framed;
 
 use anyhow::Context;
@@ -98,7 +98,7 @@ impl Peer {
             .await
             .context("sending new peer data to ReqManager.")?;
 
-        // TODO: check if we are interested or not
+        // TODO: do choking
         self.am_choking = false;
 
         let (mut peer_writer, framed_rx) = framed.split();
@@ -112,7 +112,6 @@ impl Peer {
         tokio::pin!(peer_msg_stream);
 
         // this is the stream sent by other connections to peers to send have messages
-        // XXXXXX
         let manager_stream = unfold(req_manager_rx, |mut rx| async move {
             let Some(msg) = rx.recv().await else {
                 return None;
@@ -134,6 +133,11 @@ impl Peer {
         let mut stream =
             futures_util::stream_select!(peer_msg_stream, manager_stream, timeout_stream);
         let mut has_sent_req = false;
+
+        // ask req_manager what we have
+        self.send_req_manager(ReqMessage::WhatDoWeHave)
+            .await
+            .context("asking for our bitfield")?;
         loop {
             if let Some(message) = stream.next().await {
                 match message {
@@ -145,6 +149,7 @@ impl Peer {
                             }
                         }
                         ResMessage::FinishedPiece(piece_index) => {
+                            // later TODO: implement have suppression
                             let have_payload = HavePayload { piece_index };
                             peer_writer
                                 .send(PeerMessage::Have(have_payload))
@@ -152,11 +157,32 @@ impl Peer {
                                 .context("send have")?;
                             eprintln!("sent have");
                         }
-                        ResMessage::NewBlockQueue(request_piece_payloads) => todo!(
-                            "if it's empty prolly should set interested to false and vice-versa"
-                        ),
-                        ResMessage::Block(response_piece_payload) => todo!("send block"),
-                        ResMessage::WeHave(items) => todo!("send bitfield"),
+                        ResMessage::NewBlockQueue(request_piece_payloads) => {
+                            self.req_queue.extend_from_slice(&request_piece_payloads);
+                            self.am_interested = if self.req_queue.is_empty() {
+                                false
+                            } else {
+                                true
+                            };
+                        }
+                        ResMessage::Block(response_piece_payload) => {
+                            if let Some(payload) = response_piece_payload {
+                                peer_writer
+                                    .send(PeerMessage::Piece(payload))
+                                    .await
+                                    .context("Sending block")?;
+                            }
+                            // TODO: else?
+                        }
+                        ResMessage::WeHave(bitfield) => {
+                            // later TODO: implement lazy bitfield?
+                            peer_writer
+                                .send(PeerMessage::Bitfield(BitfieldPayload {
+                                    pieces_available: bitfield,
+                                }))
+                                .await
+                                .context("sending our bitfield")?;
+                        }
                     },
                     Msg::Data(message) => {
                         match message {
@@ -176,17 +202,6 @@ impl Peer {
                                     .await
                                     .context("sending bitfield to ReqManager")?;
                                 self.update_req_queue().await?;
-                                // TODO: we're interested by default for now
-
-                                // TODO: put that up since this will always be false
-                                // if !self.req_queue.is_empty() {
-                                //     let interested_msg = PeerMessage::Interested(NoPayload);
-                                //     peer_writer
-                                //         .send(interested_msg)
-                                //         .await
-                                //         .context("write interested frame")?;
-                                //     self.req_next_block(&mut peer_writer).await?;
-                                // }
 
                                 self.am_interested = true;
                             }
@@ -194,18 +209,6 @@ impl Peer {
                                 self.send_req_manager(ReqMessage::NeedBlock(request_piece_payload))
                                     .await
                                     .context("requesting ReqManager for block")?;
-
-                                // TODO: move that up
-                                // if let Some(response_piece_payload) = block {
-                                //     peer_writer
-                                //         .send(PeerMessage::Piece(response_piece_payload))
-                                //         .await
-                                //         .context("send response")?;
-                                // } else {
-                                //     // TODO: I'm not sure if we should send something if the peer sent us a request for
-                                //     // either: a piece that we don't have
-                                //     // or: just an invalid request
-                                // }
                             }
                             PeerMessage::Piece(response_piece_payload) => {
                                 self.send_req_manager(ReqMessage::GotBlock(response_piece_payload))
@@ -224,11 +227,6 @@ impl Peer {
                                 .await
                                 .context("requesting block")?;
                             has_sent_req = true;
-
-                            // keep the queue always full
-                            if self.req_queue.len() < 3 {
-                                self.update_req_queue().await?;
-                            }
                         }
                     }
                     Msg::Timeout => peer_writer.send(PeerMessage::KeepAlive(NoPayload)).await?,
@@ -258,6 +256,11 @@ impl Peer {
         } else if let Some(req) = self.req_queue.pop() {
             let req_msg = PeerMessage::Request(req);
             peer_writer.send(req_msg).await.context("Writing req")?;
+
+            // keep the queue always full
+            if self.req_queue.len() < 3 {
+                self.update_req_queue().await?;
+            }
         }
 
         Ok(())
