@@ -19,7 +19,7 @@ pub(self) const MAX_PIECES_IN_PARALLEL: usize = 2;
 /// A message sent by a local peer to this Manager
 #[derive(Debug, Clone)]
 pub enum ReqMessage {
-    NewConnection(([u8; 20], PeerConn)),
+    NewConnection(PeerConn),
     PeerHas(Vec<bool>),
     NeedBlockQueue,
     GotBlock(ResponsePiecePayload),
@@ -140,12 +140,16 @@ impl ReqManager {
     pub async fn run(&mut self) -> anyhow::Result<()> {
         while let Some(peer_msg) = self.rx.recv().await {
             let Some(peer) = self.peers.get(&peer_msg.peer_id) else {
-                todo!("ignore it.");
+                // insert it if the message is a NewConnection, otherwise ignore it
+                if let ReqMessage::NewConnection(peer_conn) = peer_msg.msg {
+                    self.peers.insert(peer_msg.peer_id, peer_conn);
+                }
+                continue;
             };
             match peer_msg.msg {
-                ReqMessage::NewConnection((id, peer_conn)) => {
-                    self.peers.insert(id, peer_conn);
-                }
+                ReqMessage::NewConnection(_) => (
+                    // we already inserted it
+                ),
                 ReqMessage::GotBlock(block) => {
                     if let Some(piece_index) = dbg!(self.write_block(block).await)? {
                         self.peers

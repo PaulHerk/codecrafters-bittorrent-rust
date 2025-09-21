@@ -22,7 +22,14 @@ impl Payload for BitfieldPayload {
     }
 
     fn to_be_bytes(&self) -> Vec<u8> {
-        todo!()
+        self.pieces_available
+            .chunks(8)
+            .map(|byte| {
+                byte.iter()
+                    .enumerate()
+                    .fold(0_u8, |acc, (i, &b)| acc | (if b { 1 << i } else { 0 }))
+            })
+            .collect()
     }
 }
 

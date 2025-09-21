@@ -94,7 +94,7 @@ impl Peer {
             sender: tx,
             has: Vec::new(),
         };
-        self.send_req_manager(ReqMessage::NewConnection((self.peer_id, peer_conn)))
+        self.send_req_manager(ReqMessage::NewConnection(peer_conn))
             .await
             .context("sending new peer data to ReqManager.")?;
 
