@@ -132,7 +132,7 @@ impl Peer {
 
         let mut stream =
             futures_util::stream_select!(peer_msg_stream, manager_stream, timeout_stream);
-        let mut waiting_for_piece = false;
+        let mut blocks_left_for_queue = 0_u32;
 
         // ask req_manager what we have
         self.send_req_manager(ReqMessage::WhatDoWeHave)
@@ -210,7 +210,8 @@ impl Peer {
                                     .context("sending bitfield to ReqManager")?;
                                 // TODO: we might want to do it more efficient than requesting the whole queue
                                 // this currently starts the whole loop by setting the interested flag eventually
-                                self.req_next_block(&mut peer_writer).await?;
+                                // self.req_next_block(&mut peer_writer).await?;
+                                self.send_req_manager(ReqMessage::NeedBlockQueue).await?;
                             }
                             PeerMessage::Request(request_piece_payload) => {
                                 self.send_req_manager(ReqMessage::NeedBlock(request_piece_payload))
@@ -225,9 +226,9 @@ impl Peer {
                                 self.send_req_manager(ReqMessage::GotBlock(response_piece_payload))
                                     .await
                                     .context("sending that we got block to ReqManager")?;
-                                waiting_for_piece = false;
+                                blocks_left_for_queue -= 1;
                             }
-                            PeerMessage::Cancel(_request_piece_payload) => todo!(), // only for extension, won't probably use it
+                            PeerMessage::Cancel(_request_piece_payload) => todo!(), // only for end-game, won't probably use it
                             PeerMessage::KeepAlive(_no_payload) => {
                                 eprintln!("he sent a keep alive")
                             }
@@ -236,15 +237,15 @@ impl Peer {
                     Msg::Timeout => peer_writer.send(PeerMessage::KeepAlive(NoPayload)).await?,
                 }
 
-                // request next block
-                if !waiting_for_piece && self.am_interested && !self.peer_choking {
-                    if self
-                        .req_next_block(&mut peer_writer)
-                        .await
-                        .context("requesting block")?
-                    {
-                        waiting_for_piece = true;
+                // request next blocks
+                if blocks_left_for_queue == 0 && self.am_interested && !self.peer_choking {
+                    for req in self.req_queue.iter() {
+                        let req_msg = PeerMessage::Request(req.clone());
+                        peer_writer.send(req_msg).await?;
                     }
+                    blocks_left_for_queue = self.req_queue.len() as u32;
+                    self.req_queue.clear();
+                    self.send_req_manager(ReqMessage::NeedBlockQueue).await?;
                 }
             } else {
                 eprintln!("peer disconnected");
@@ -302,19 +303,6 @@ impl Peer {
         };
         peer_writer.send(msg).await.context("sending choked")?;
         Ok(())
-    }
-
-    async fn req_next_block(&mut self, peer_writer: &mut PeerWriter) -> anyhow::Result<bool> {
-        if let Some(req) = self.req_queue.pop() {
-            let req_msg = PeerMessage::Request(req);
-            peer_writer.send(req_msg).await.context("Writing req")?;
-            Ok(true)
-        } else {
-            self.send_req_manager(ReqMessage::NeedBlockQueue)
-                .await
-                .context("asking for new block-queue")?;
-            Ok(false)
-        }
     }
 
     async fn sever_conn(&mut self, peer_writer: &mut PeerWriter) -> bool {

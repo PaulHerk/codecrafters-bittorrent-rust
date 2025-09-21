@@ -150,7 +150,7 @@ impl ReqManager {
                 continue;
             };
             match peer_msg.msg {
-                ReqMessage::NewConnection(peer_conn) => (
+                ReqMessage::NewConnection(_peer_conn) => (
                                 // we already inserted it
                             ),
                 ReqMessage::GotBlock(block) => {
