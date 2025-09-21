@@ -14,44 +14,38 @@ impl ReqManager {
         n: usize,
         peer_has: Vec<bool>,
     ) -> Vec<RequestPiecePayload> {
-        let Some(download_queue) = &mut self.download_queue else {
+        let Some(download_queue) = &self.download_queue else {
             return Vec::new();
         };
 
         // 1. Try if we have something in the download queue
-        let piece = download_queue
-            .iter_mut()
-            .find(|state| {
-                let peer_has_it = peer_has[state.piece_i as usize] == true;
-                let blocks_we_need = state.blocks.iter().filter(|b| b.is_none());
-                // TODO: now currently if there's only one block remaining in the queue, it will return only that one
-                // we might want to return that plus like 9 more of the next piece
-                return peer_has_it && blocks_we_need.count() >= 1;
-            })
-            .cloned();
-        dbg!(
-            &download_queue
-                .iter()
-                .map(|s| (s.piece_i, &s.blocks))
-                .collect::<Vec<_>>()
-        );
+        let piece_i = download_queue.iter().position(|state| {
+            let peer_has_it = peer_has[state.piece_i as usize] == true;
+            let blocks_we_need = state.blocks.iter().filter(|b| b.is_none());
+            // TODO: now currently if there's only one block remaining in the queue, it will return only that one
+            // we might want to return that plus like 9 more of the next piece
+            return peer_has_it && dbg!(blocks_we_need).count() >= 1;
+        });
+
         // 2. If not, add something to the queue: realistically rarest-first
-        if let None = piece {
-            if !self.add_piece_to_queue(&peer_has) {
+        if let None = piece_i {
+            if !dbg!(self.add_piece_to_queue(&peer_has)) {
                 return Vec::new();
             };
         }
-        // we also need new mutable access to the download_queue since self might have changed above
-        let Some(download_queue) = &mut self.download_queue else {
-            unreachable!("we checked that before")
-        };
-        let piece = piece.or(download_queue.back_mut().cloned());
 
-        let Some(mut piece) = piece else {
-            unreachable!(
-                "the download_queue will have a last piece, because it may have been added by self.add_piece_to_queue. If it hasn't, we checked that."
+        // we also need new mutable access to the download_queue since self might have changed above
+        let download_queue_mut = self
+            .download_queue
+            .as_mut()
+            .expect("we checked that before");
+
+        let piece_i = piece_i.or(download_queue_mut.len().checked_sub(1)).expect(
+                "the download_queue will have a last piece, because it may have been added by self.add_piece_to_queue. If it hasn't, we have returned."
             );
-        };
+        let piece = download_queue_mut
+            .get_mut(piece_i)
+            .expect("we checked that before");
 
         // 3. Actually create the responses
         let mut requests = Vec::with_capacity(n);

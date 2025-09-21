@@ -192,6 +192,8 @@ impl Encoder<PeerMessage> for MessageFramer {
         dst.extend_from_slice(&length.to_be_bytes());
         dst.put_u8(msg_type as u8);
         dst.extend_from_slice(&bytes);
+
+        dbg!(&dst);
         Ok(())
     }
 }

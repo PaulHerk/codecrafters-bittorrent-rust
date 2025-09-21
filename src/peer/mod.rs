@@ -92,7 +92,7 @@ impl Peer {
         let (tx, req_manager_rx) = mpsc::channel(8);
         let peer_conn = PeerConn {
             sender: tx,
-            has: Vec::new(),
+            has: BitfieldPayload::new(),
         };
         self.send_req_manager(ReqMessage::NewConnection(peer_conn))
             .await
@@ -132,12 +132,12 @@ impl Peer {
 
         let mut stream =
             futures_util::stream_select!(peer_msg_stream, manager_stream, timeout_stream);
-        let mut has_sent_req = false;
+        let mut have_sent_req = false;
 
         // ask req_manager what we have
-        self.send_req_manager(ReqMessage::WhatDoWeHave)
-            .await
-            .context("asking for our bitfield")?;
+        // self.send_req_manager(ReqMessage::WhatDoWeHave)
+        //     .await
+        //     .context("asking for our bitfield")?;
         loop {
             if let Some(message) = stream.next().await {
                 match message {
@@ -159,11 +159,12 @@ impl Peer {
                         }
                         ResMessage::NewBlockQueue(request_piece_payloads) => {
                             self.req_queue.extend_from_slice(&request_piece_payloads);
-                            self.am_interested = if self.req_queue.is_empty() {
-                                false
+                            if self.req_queue.is_empty() {
+                                self.set_interested(&mut peer_writer, false).await?;
                             } else {
-                                true
+                                self.set_interested(&mut peer_writer, true).await?;
                             };
+                            dbg!(&self.req_queue);
                         }
                         ResMessage::Block(response_piece_payload) => {
                             if let Some(payload) = response_piece_payload {
@@ -176,12 +177,12 @@ impl Peer {
                         }
                         ResMessage::WeHave(bitfield) => {
                             // later TODO: implement lazy bitfield?
-                            peer_writer
-                                .send(PeerMessage::Bitfield(BitfieldPayload {
-                                    pieces_available: bitfield,
-                                }))
-                                .await
-                                .context("sending our bitfield")?;
+                            if !bitfield.is_empty() {
+                                peer_writer
+                                    .send(PeerMessage::Bitfield(bitfield))
+                                    .await
+                                    .context("sending our bitfield")?;
+                            }
                         }
                     },
                     Msg::Data(message) => {
@@ -197,13 +198,11 @@ impl Peer {
                                 self.has[have_payload.piece_index as usize] = true
                             }
                             PeerMessage::Bitfield(bitfield_payload) => {
-                                self.has = bitfield_payload.pieces_available;
-                                self.send_req_manager(ReqMessage::PeerHas(self.has.clone()))
+                                self.has = bitfield_payload.pieces_available.clone();
+                                self.send_req_manager(ReqMessage::PeerHas(bitfield_payload))
                                     .await
                                     .context("sending bitfield to ReqManager")?;
                                 self.update_req_queue().await?;
-
-                                self.am_interested = true;
                             }
                             PeerMessage::Request(request_piece_payload) => {
                                 self.send_req_manager(ReqMessage::NeedBlock(request_piece_payload))
@@ -214,19 +213,12 @@ impl Peer {
                                 self.send_req_manager(ReqMessage::GotBlock(response_piece_payload))
                                     .await
                                     .context("sending that we got block to ReqManager")?;
-                                has_sent_req = false;
+                                have_sent_req = false;
                             }
                             PeerMessage::Cancel(_request_piece_payload) => todo!(), // only for extension, won't probably use it
                             PeerMessage::KeepAlive(_no_payload) => {
                                 eprintln!("he sent a keep alive")
                             }
-                        }
-                        // request next block
-                        if !has_sent_req && self.am_interested && !self.peer_choking {
-                            self.req_next_block(&mut peer_writer)
-                                .await
-                                .context("requesting block")?;
-                            has_sent_req = true;
                         }
                     }
                     Msg::Timeout => peer_writer.send(PeerMessage::KeepAlive(NoPayload)).await?,
@@ -234,6 +226,15 @@ impl Peer {
             } else {
                 eprintln!("peer disconnected");
                 break Err(anyhow::anyhow!("peer disconnected"));
+            }
+
+            // request next block
+            if !have_sent_req && self.am_interested && !self.peer_choking {
+                dbg!("requesting block");
+                self.req_next_block(&mut peer_writer)
+                    .await
+                    .context("requesting block")?;
+                have_sent_req = true;
             }
         }
     }
@@ -250,17 +251,53 @@ impl Peer {
             .await
     }
 
+    /// this sets our interested flag and sends the message to the peer
+    async fn set_interested(
+        &mut self,
+        peer_writer: &mut PeerWriter,
+        interested: bool,
+    ) -> anyhow::Result<()> {
+        if interested == self.peer_interested {
+            return Ok(());
+        }
+        self.am_interested = interested;
+
+        let msg = if interested {
+            PeerMessage::Interested(NoPayload)
+        } else {
+            PeerMessage::NotInterested(NoPayload)
+        };
+        peer_writer.send(msg).await.context("sending interested")?;
+        Ok(())
+    }
+
+    /// this sets our choked flag and sends the message to the peer
+    async fn set_choking(
+        &mut self,
+        peer_writer: &mut PeerWriter,
+        choking: bool,
+    ) -> anyhow::Result<()> {
+        if choking == self.peer_choking {
+            return Ok(());
+        }
+        self.am_choking = choking;
+        let msg = if choking {
+            PeerMessage::Choke(NoPayload)
+        } else {
+            PeerMessage::Unchoke(NoPayload)
+        };
+        peer_writer.send(msg).await.context("sending choked")?;
+        Ok(())
+    }
+
     async fn req_next_block(&mut self, peer_writer: &mut PeerWriter) -> anyhow::Result<()> {
         if self.req_queue.is_empty() {
+            dbg!("actually not");
             return self.update_req_queue().await;
         } else if let Some(req) = self.req_queue.pop() {
             let req_msg = PeerMessage::Request(req);
             peer_writer.send(req_msg).await.context("Writing req")?;
-
-            // keep the queue always full
-            if self.req_queue.len() < 3 {
-                self.update_req_queue().await?;
-            }
+            eprintln!("sent req");
         }
 
         Ok(())

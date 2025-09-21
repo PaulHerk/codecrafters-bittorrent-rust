@@ -7,7 +7,7 @@ use std::{
 use anyhow::Context;
 use tokio::sync::mpsc;
 
-use crate::{DBConnection, RequestPiecePayload, ResponsePiecePayload, Torrent};
+use crate::{BitfieldPayload, DBConnection, RequestPiecePayload, ResponsePiecePayload, Torrent};
 
 mod file_manager;
 mod req_preparer;
@@ -20,7 +20,7 @@ pub(self) const MAX_PIECES_IN_PARALLEL: usize = 2;
 #[derive(Debug, Clone)]
 pub enum ReqMessage {
     NewConnection(PeerConn),
-    PeerHas(Vec<bool>),
+    PeerHas(BitfieldPayload),
     NeedBlockQueue,
     GotBlock(ResponsePiecePayload),
     NeedBlock(RequestPiecePayload),
@@ -49,7 +49,7 @@ pub struct ReqMsgFromPeer {
 pub(super) enum ResMessage {
     NewBlockQueue(Vec<RequestPiecePayload>),
     Block(Option<ResponsePiecePayload>),
-    WeHave(Vec<bool>),
+    WeHave(BitfieldPayload),
     FinishedPiece(u32),
     FinishedFile,
 }
@@ -73,7 +73,7 @@ pub struct ReqManager {
 #[derive(Debug, Clone)]
 pub struct PeerConn {
     pub(super) sender: mpsc::Sender<ResMessage>,
-    pub(super) has: Vec<bool>, // download_speed or something maybe
+    pub(super) has: BitfieldPayload, // download_speed or something maybe
 }
 
 #[derive(Clone, Debug)]
@@ -175,7 +175,10 @@ impl ReqManager {
                     }
                 }
                 ReqMessage::NeedBlockQueue => {
-                    let blocks = self.prepare_next_blocks(BLOCK_QUEUE_SIZE_MAX, peer.has.clone());
+                    let blocks = self.prepare_next_blocks(
+                        BLOCK_QUEUE_SIZE_MAX,
+                        peer.has.pieces_available.clone(),
+                    );
                     self.peers
                         .get(&peer_msg.peer_id)
                         .expect("we checked that before")
@@ -186,7 +189,9 @@ impl ReqManager {
                 }
                 ReqMessage::WhatDoWeHave => {
                     peer.sender
-                        .send(ResMessage::WeHave(self.have.clone()))
+                        .send(ResMessage::WeHave(BitfieldPayload {
+                            pieces_available: self.have.clone(),
+                        }))
                         .await
                         .context("send have")?;
                 }

@@ -1,5 +1,6 @@
 pub trait Payload {
     fn from_be_bytes(payload: &[u8]) -> Self;
+    /// the bytes in BE order without the length & message prefix
     fn to_be_bytes(&self) -> Vec<u8>;
 }
 
@@ -7,6 +8,17 @@ pub trait Payload {
 pub struct BitfieldPayload {
     /// a bitfield with each index that downloader has sent set to one and the rest set to zero
     pub pieces_available: Vec<bool>,
+}
+impl BitfieldPayload {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.pieces_available.iter().all(|b| !*b)
+    }
+
+    pub(crate) fn new() -> Self {
+        Self {
+            pieces_available: Vec::new(),
+        }
+    }
 }
 impl Payload for BitfieldPayload {
     fn from_be_bytes(payload: &[u8]) -> Self {
@@ -27,7 +39,7 @@ impl Payload for BitfieldPayload {
             .map(|byte| {
                 byte.iter()
                     .enumerate()
-                    .fold(0_u8, |acc, (i, &b)| acc | (if b { 1 << i } else { 0 }))
+                    .fold(0_u8, |acc, (i, &b)| acc | (if b { 128_u8 >> i } else { 0 }))
             })
             .collect()
     }
@@ -97,7 +109,6 @@ impl Payload for ResponsePiecePayload {
 #[derive(Debug, Clone, Copy)]
 pub struct HavePayload {
     /// a single number, the index which that downloader just completed and checked the hash of
-    /// no idea if it's a u32 or u8 or what
     pub piece_index: u32,
 }
 
