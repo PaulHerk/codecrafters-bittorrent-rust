@@ -154,6 +154,7 @@ impl Decoder for MessageFramer {
                 //     std::io::ErrorKind::InvalidData,
                 //     format!("Invalid message type: {:?}", src[4]),
                 // ))
+                src.advance(4 + data_length as usize);
                 return Ok(None);
             }
         };
