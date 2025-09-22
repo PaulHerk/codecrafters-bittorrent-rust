@@ -122,13 +122,11 @@ impl Decoder for MessageFramer {
         }
 
         let data = if data_length > 1 {
-            src[5..4 + data_length as usize].to_vec()
+            &src[5..4 + data_length as usize]
         } else {
-            vec![]
+            &[]
         };
-        let data = data.as_slice();
         let msg_type = src[4];
-        src.advance(4 + data_length as usize);
 
         let payload = match serde_json::from_str::<MessageType>(&msg_type.to_string()) {
             Ok(MessageType::Choke) => Ok::<_, std::io::Error>(PeerMessage::Choke(NoPayload)),
@@ -136,7 +134,6 @@ impl Decoder for MessageFramer {
             Ok(MessageType::Interested) => Ok(PeerMessage::Interested(NoPayload)),
             Ok(MessageType::NotInterested) => Ok(PeerMessage::NotInterested(NoPayload)),
             Ok(MessageType::Have) => Ok(PeerMessage::Have(HavePayload::from_be_bytes(data))),
-
             Ok(MessageType::Bitfield) => {
                 Ok(PeerMessage::Bitfield(BitfieldPayload::from_be_bytes(data)))
             }
@@ -160,6 +157,7 @@ impl Decoder for MessageFramer {
                 return Ok(None);
             }
         };
+        src.advance(4 + data_length as usize);
         Ok(Some(payload?))
     }
 }

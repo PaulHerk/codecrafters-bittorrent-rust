@@ -14,7 +14,7 @@ use crate::{
 mod file_manager;
 mod req_preparer;
 
-pub const BLOCK_QUEUE_SIZE_MAX: usize = 10;
+pub const BLOCK_QUEUE_SIZE_MAX: usize = 20;
 /// how many pieces are in the queue at max
 pub(self) const MAX_PIECES_IN_PARALLEL: usize = 2;
 
