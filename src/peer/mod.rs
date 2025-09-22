@@ -59,17 +59,15 @@ impl Peer {
             req_manager_tx,
         }
     }
+
     /// info_hash: the info hash of the torrent
-    /// peer_id: a unique identifier for your client
     pub async fn shake_hands_get_framed(
         &mut self,
         info_hash: &[u8; 20],
+        mut tcp: tokio::net::TcpStream,
     ) -> anyhow::Result<MsgFrameType> {
-        let mut tcp = tokio::net::TcpStream::connect(self.addr)
-            .await
-            .context("connect to peer")?;
+        // TODOO: put Peer and PeerConnection in seperate structs
         self.state = PeerState::Connected;
-
         let handshake_to_send = Handshake::new(*info_hash, self.peer_id);
         let handshake_recv = handshake_to_send
             .shake_hands(&mut tcp)
