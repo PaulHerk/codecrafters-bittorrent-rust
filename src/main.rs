@@ -189,7 +189,8 @@ async fn get_response(torrent: &Torrent, info_hash: &[u8; 20]) -> anyhow::Result
     let mut url = Url::parse(&torrent.announce).context("parse url")?;
     url.set_query(Some(&request.to_url_encoded()));
 
-    let response = reqwest::get(url).await.context("send request")?;
+    let client = reqwest::Client::builder().user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36").build()?;
+    let response = client.get(url).send().await.context("send request")?;
     let response_bytes = response
         .bytes()
         .await

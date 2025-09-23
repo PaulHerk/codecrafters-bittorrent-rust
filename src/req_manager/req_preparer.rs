@@ -78,6 +78,7 @@ impl ReqManager {
         let Some(queue) = &mut self.download_queue else {
             return false;
         };
+        // XXX
         if queue.len() == MAX_PIECES_IN_PARALLEL {
             return false;
         }
