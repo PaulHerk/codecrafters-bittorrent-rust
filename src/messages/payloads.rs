@@ -13,12 +13,6 @@ impl BitfieldPayload {
     pub(crate) fn is_nothing(&self) -> bool {
         self.pieces_available.iter().all(|b| !*b)
     }
-
-    pub(crate) fn new() -> Self {
-        Self {
-            pieces_available: Vec::new(),
-        }
-    }
 }
 impl Payload for BitfieldPayload {
     fn from_be_bytes(payload: &[u8]) -> Self {

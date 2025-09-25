@@ -33,7 +33,6 @@ pub(crate) struct PeerState(pub(crate) Arc<PeerStateInner>);
 #[derive(Debug)]
 pub(crate) struct PeerStateInner {
     pub peer_id: [u8; 20],
-    pub addr: SocketAddrV4,
     // dk if I need this at all
     // pub state: Arc<Mutex<super::PeerState>>,
     pub am_choking: Mutex<bool>,
@@ -45,10 +44,9 @@ pub(crate) struct PeerStateInner {
 }
 
 impl PeerState {
-    pub(crate) fn new(addr: SocketAddrV4, peer_id: [u8; 20]) -> Self {
+    pub(crate) fn new(peer_id: [u8; 20]) -> Self {
         let peer_identifier_inner = PeerStateInner {
             peer_id,
-            addr,
             am_choking: Mutex::new(true),
             am_interested: Mutex::new(false),
             peer_choking: Mutex::new(true),
@@ -71,23 +69,33 @@ pub struct Peer {
 }
 
 impl Peer {
-    pub async fn connect(
+    pub async fn connect_from_addr(
         addr: SocketAddrV4,
         info_hash: [u8; 20],
         peer_id: [u8; 20],
         req_manager_tx: Sender<ReqMsgFromPeer>,
     ) -> anyhow::Result<(Self, BoxedMsgStream)> {
         // set up tcp connection & shake hands
-        let mut tcp = tokio::net::TcpStream::connect(addr)
+        let tcp = tokio::net::TcpStream::connect(addr)
             .await
             .context("establishing tcp connection")?;
+
+        Peer::connect_from_stream(tcp, info_hash, peer_id, req_manager_tx).await
+    }
+
+    pub async fn connect_from_stream(
+        mut tcp: TcpStream,
+        info_hash: [u8; 20],
+        peer_id: [u8; 20],
+        req_manager_tx: Sender<ReqMsgFromPeer>,
+    ) -> anyhow::Result<(Self, BoxedMsgStream)> {
         let handshake_recv = Handshake::new(info_hash, peer_id)
             .shake_hands(&mut tcp)
             .await
             .context("shaking hands with peer")?;
-        println!("peer {} connected", addr);
+        println!("peer {} connected", tcp.peer_addr().unwrap());
 
-        let peer_identifier = PeerState::new(addr, handshake_recv.peer_id);
+        let peer_identifier = PeerState::new(handshake_recv.peer_id);
 
         // after the handshake as succeeded we can create the message framer that de- & encodes the messages
         // from the tcp stream

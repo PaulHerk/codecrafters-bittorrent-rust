@@ -5,7 +5,6 @@ use codecrafters_bittorrent::*;
 use reqwest::Url;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::path::PathBuf;
-use std::str::FromStr;
 use tokio::sync::mpsc;
 
 const PEER_ID: &[u8; 20] = b"-AZ2060-222222222222";
@@ -81,9 +80,8 @@ async fn main() -> anyhow::Result<()> {
         DecodeMetadataType::Handshake { torrent, addr } => {
             let torrent = Torrent::read_from_file(torrent)?;
             let (tx, _rx) = mpsc::channel(1);
-            let mut peer = Peer::connect(*addr, torrent.info_hash(), *PEER_ID, tx).await?;
-            let tcp = tokio::net::TcpStream::connect(addr).await?;
-            println!("Peer");
+            let _peer = Peer::connect_from_addr(*addr, torrent.info_hash(), *PEER_ID, tx).await?;
+            println!("Peer connected");
         }
         DecodeMetadataType::DownloadPiece {
             output: _,
@@ -150,7 +148,7 @@ async fn main() -> anyhow::Result<()> {
                 let req_manager_tx = req_manager_tx.clone();
                 tokio::spawn(async move {
                     let (mut peer, stream) =
-                        Peer::connect(addr, info_hash.clone(), *PEER_ID, req_manager_tx)
+                        Peer::connect_from_addr(addr, info_hash.clone(), *PEER_ID, req_manager_tx)
                             .await
                             .context("initializing peer")
                             .unwrap();
@@ -163,12 +161,11 @@ async fn main() -> anyhow::Result<()> {
             let listener = tokio::net::TcpListener::bind(addr).await?;
             loop {
                 let connection = listener.accept().await;
-                let Ok((stream, addr)) = connection else {
+                let Ok((stream, _addr)) = connection else {
                     continue;
                 };
-                let addr = SocketAddrV4::from_str(&addr.to_string()).expect("invalid address");
                 let (mut peer, stream) =
-                    Peer::connect(addr, info_hash, *PEER_ID, req_manager_tx.clone())
+                    Peer::connect_from_stream(stream, info_hash, *PEER_ID, req_manager_tx.clone())
                         .await
                         .context("initializing incoming peer connection")
                         .unwrap();
