@@ -33,6 +33,7 @@ impl ReqManager {
                 return Vec::new();
             };
         }
+        drop(peer_has);
 
         // we also need new mutable access to the download_queue since self might have changed above
         let download_queue_mut = self
@@ -102,7 +103,7 @@ impl ReqManager {
         };
 
         let piece_state = PieceState::new(&self.torrent, *piece_i);
-        queue.push_back(piece_state);
+        queue.push(piece_state);
 
         true
     }

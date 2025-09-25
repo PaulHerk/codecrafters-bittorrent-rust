@@ -36,7 +36,7 @@ impl ReqManager {
         if piece_state.blocks.iter().all(|b| b.is_finished()) {
             println!("piece {} is done", piece_state.piece_i);
             // we're done with this piece
-            let piece_state = download_queue.remove(queue_i).expect("Index exists.");
+            let piece_state = download_queue.remove(queue_i);
             self.handle_piece(&piece_state).await?;
             self.inform_peers(piece_state.piece_i).await?;
 

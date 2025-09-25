@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::HashMap,
     fs::{File, OpenOptions},
     path::PathBuf,
 };
@@ -8,7 +8,8 @@ use anyhow::Context;
 use tokio::sync::mpsc;
 
 use crate::{
-    BitfieldPayload, DBConnection, HavePayload, RequestPiecePayload, ResponsePiecePayload, Torrent,
+    BitfieldPayload, DBConnection, RequestPiecePayload, ResponsePiecePayload, Torrent,
+    conn::PeerState,
 };
 
 mod file_manager;
@@ -22,8 +23,6 @@ pub(self) const MAX_PIECES_IN_PARALLEL: usize = 2;
 #[derive(Debug, Clone)]
 pub enum ReqMessage {
     NewConnection(PeerConn),
-    PeerBitfield(BitfieldPayload),
-    PeerHas(HavePayload),
     NeedBlockQueue,
     GotBlock(ResponsePiecePayload),
     NeedBlock(RequestPiecePayload),
@@ -66,7 +65,7 @@ pub struct ReqManager {
     /// so let's cache it
     have: Vec<bool>,
     /// if it's None, we are finished
-    download_queue: Option<VecDeque<PieceState>>,
+    download_queue: Option<Vec<PieceState>>,
     pub torrent: Torrent,
     /// this is also cached, it'll never change
     info_hash: String,
@@ -76,7 +75,7 @@ pub struct ReqManager {
 #[derive(Debug, Clone)]
 pub struct PeerConn {
     pub(super) sender: mpsc::Sender<ResMessage>,
-    pub(super) has: BitfieldPayload, // download_speed or something maybe
+    pub(super) identifier: PeerState,
 }
 
 #[derive(Clone, Debug)]
@@ -124,7 +123,7 @@ impl ReqManager {
         let download_state = if file_info.is_finished() {
             None
         } else {
-            Some(VecDeque::with_capacity(MAX_PIECES_IN_PARALLEL))
+            Some(Vec::with_capacity(MAX_PIECES_IN_PARALLEL))
         };
         let info_hash = hex::encode(torrent.info_hash());
 
@@ -178,10 +177,8 @@ impl ReqManager {
                     }
                 }
                 ReqMessage::NeedBlockQueue => {
-                    let blocks = self.prepare_next_blocks(
-                        BLOCK_QUEUE_SIZE_MAX,
-                        peer.has.pieces_available.clone(),
-                    );
+                    let peer_has = peer.identifier.0.has.lock().unwrap().clone();
+                    let blocks = self.prepare_next_blocks(BLOCK_QUEUE_SIZE_MAX, peer_has);
                     self.peers
                         .get(&peer_msg.peer_id)
                         .expect("we checked that before, just need mutable reference again")
@@ -197,20 +194,6 @@ impl ReqManager {
                         }))
                         .await
                         .context("send have")?;
-                }
-                ReqMessage::PeerBitfield(bitfield) => {
-                    let peers_mut = self
-                        .peers
-                        .get_mut(&peer_msg.peer_id)
-                        .expect("we checked that before");
-                    peers_mut.has = bitfield;
-                }
-                ReqMessage::PeerHas(have_payload) => {
-                    self.peers
-                        .get_mut(&peer_msg.peer_id)
-                        .expect("checked that")
-                        .has
-                        .pieces_available[have_payload.piece_index as usize] = true;
                 }
             }
         }

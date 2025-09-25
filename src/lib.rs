@@ -15,7 +15,6 @@ pub use peer::handshake::*;
 pub use peer::states::*;
 pub use peer::*;
 pub use req_manager::*;
-use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 pub use torrent::*;
 pub use tracker::*;

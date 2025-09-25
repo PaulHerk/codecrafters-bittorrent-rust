@@ -1,5 +1,6 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
+use codecrafters_bittorrent::conn::Peer;
 use codecrafters_bittorrent::*;
 use reqwest::Url;
 use std::net::{Ipv4Addr, SocketAddrV4};
@@ -80,13 +81,9 @@ async fn main() -> anyhow::Result<()> {
         DecodeMetadataType::Handshake { torrent, addr } => {
             let torrent = Torrent::read_from_file(torrent)?;
             let (tx, _rx) = mpsc::channel(1);
-            let mut peer = Peer::new(*PEER_ID, *addr, tx);
+            let mut peer = Peer::connect(*addr, torrent.info_hash(), *PEER_ID, tx).await?;
             let tcp = tokio::net::TcpStream::connect(addr).await?;
-            let _framed = peer
-                .shake_hands_get_framed(&torrent.info_hash(), tcp)
-                .await
-                .context("shake hands")?;
-            println!("Peer Id: {}", hex::encode(peer.peer_id));
+            println!("Peer");
         }
         DecodeMetadataType::DownloadPiece {
             output: _,
@@ -149,16 +146,15 @@ async fn main() -> anyhow::Result<()> {
                 let _ = req_manager.run().await;
             });
 
-            for peer in response.peers.0.iter() {
-                let mut peer = Peer::new(*PEER_ID, *peer, req_manager_tx.clone());
+            for &addr in response.peers.0.iter() {
+                let req_manager_tx = req_manager_tx.clone();
                 tokio::spawn(async move {
-                    let Ok(tcp) = tokio::net::TcpStream::connect(peer.addr).await else {
-                        return;
-                    };
-                    let Ok(framed) = peer.shake_hands_get_framed(&info_hash, tcp).await else {
-                        return;
-                    };
-                    peer.event_loop(framed).await.unwrap();
+                    let (mut peer, stream) =
+                        Peer::connect(addr, info_hash.clone(), *PEER_ID, req_manager_tx)
+                            .await
+                            .context("initializing peer")
+                            .unwrap();
+                    peer.event_loop(stream).await.unwrap();
                 });
             }
 
@@ -171,11 +167,12 @@ async fn main() -> anyhow::Result<()> {
                     continue;
                 };
                 let addr = SocketAddrV4::from_str(&addr.to_string()).expect("invalid address");
-                let mut peer = Peer::new(*PEER_ID, addr, req_manager_tx.clone());
-                let Ok(framed) = peer.shake_hands_get_framed(&info_hash, stream).await else {
-                    continue;
-                };
-                peer.event_loop(framed).await.unwrap();
+                let (mut peer, stream) =
+                    Peer::connect(addr, info_hash, *PEER_ID, req_manager_tx.clone())
+                        .await
+                        .context("initializing incoming peer connection")
+                        .unwrap();
+                peer.event_loop(stream).await.unwrap();
             }
         }
     }
@@ -189,7 +186,11 @@ async fn get_response(torrent: &Torrent, info_hash: &[u8; 20]) -> anyhow::Result
     let mut url = Url::parse(&torrent.announce).context("parse url")?;
     url.set_query(Some(&request.to_url_encoded()));
 
-    let client = reqwest::Client::builder().user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36").build()?;
+    let client = reqwest::Client::builder()
+        .user_agent(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:142.0) Gecko/20100101 Firefox/142.0",
+        )
+        .build()?;
     let response = client.get(url).send().await.context("send request")?;
     let response_bytes = response
         .bytes()
