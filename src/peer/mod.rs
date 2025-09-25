@@ -173,9 +173,11 @@ impl Peer {
         {
             let am_interested = &mut *self.state.0.am_interested.lock().unwrap();
             if interested != *am_interested {
+                *am_interested = interested;
+            } else {
+                // question: is am_interested dropped if I'd just do if (equal) return Ok(())?
                 return Ok(());
             }
-            *am_interested = interested;
         }
 
         let msg = if interested {

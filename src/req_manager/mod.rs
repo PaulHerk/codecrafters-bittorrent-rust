@@ -48,7 +48,7 @@ pub struct ReqMsgFromPeer {
 //  - choking: 4 active downloaders
 
 #[derive(Debug, Clone, PartialEq)]
-pub(super) enum ResMessage {
+pub enum ResMessage {
     NewBlockQueue(Vec<RequestPiecePayload>),
     Block(Option<ResponsePiecePayload>),
     WeHave(BitfieldPayload),

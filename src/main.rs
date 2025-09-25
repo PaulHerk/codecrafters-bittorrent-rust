@@ -160,7 +160,7 @@ async fn main() -> anyhow::Result<()> {
 
             // peer listener
             let addr = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, PEER_PORT);
-            let listener = tokio::net::TcpListener::bind(dbg!(addr)).await?;
+            let listener = tokio::net::TcpListener::bind(addr).await?;
             loop {
                 let connection = listener.accept().await;
                 let Ok((stream, addr)) = connection else {

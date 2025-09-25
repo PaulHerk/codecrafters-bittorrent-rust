@@ -852,7 +852,6 @@ dependencies = [
  "bytes",
  "clap",
  "futures-core",
- "futures-lite",
  "futures-sink",
  "futures-util",
  "hex",

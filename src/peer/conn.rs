@@ -127,8 +127,12 @@ async fn get_stream(framed_rx: PeerReader, req_manager_rx: Receiver<ResMessage>)
         match framed.next().timeout(Duration::from_secs(120)).await {
             Ok(Some(Ok(message))) => Some((Msg::Data(message), framed)),
             Err(_) => Some((Msg::Timeout, framed)),
-            Ok(_) => {
-                panic!("Peer closed connection.")
+            Ok(None) => {
+                // nothing really happens here
+                None
+            }
+            Ok(Some(Err(e))) => {
+                panic!("Error occured on PeerReader: {e:?}")
             }
         }
     });
