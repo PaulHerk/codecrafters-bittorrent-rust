@@ -79,8 +79,9 @@ impl ReqManager {
         let Some(queue) = &mut self.download_queue else {
             return false;
         };
-        // XXX
-        if queue.len() == MAX_PIECES_IN_PARALLEL {
+
+        // if the queue is already to big but we're at the last piece, we still want to add it
+        if queue.len() == MAX_PIECES_IN_PARALLEL && self.have.iter().filter(|b| **b).count() > 1 {
             return false;
         }
 
@@ -89,8 +90,9 @@ impl ReqManager {
             .iter()
             .zip(peer_has)
             .enumerate()
-            .filter_map(|(index, (i, p))| {
-                if !*i && *p && queue.iter().find(|s| s.piece_i == index as u32).is_none() {
+            .filter_map(|(index, (i_have, p_has))| {
+                if !*i_have && *p_has && queue.iter().find(|s| s.piece_i == index as u32).is_none()
+                {
                     Some(index as u32)
                 } else {
                     None
@@ -111,7 +113,7 @@ impl ReqManager {
 
 impl PieceState {
     /// calculates n_blocks and piece_size and creates a new PieceState
-    fn new(torrent: &Torrent, piece_i: u32) -> Self {
+    pub(super) fn new(torrent: &Torrent, piece_i: u32) -> Self {
         let piece_size = get_piece_size(torrent, piece_i);
         let n_blocks = piece_size.div_ceil(BLOCK_MAX);
 

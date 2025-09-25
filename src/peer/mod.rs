@@ -21,7 +21,7 @@ pub enum Msg {
 }
 
 impl Peer {
-    pub async fn event_loop(&mut self, mut receiver_stream: BoxedMsgStream) -> anyhow::Result<()> {
+    pub async fn event_loop(mut self, mut receiver_stream: BoxedMsgStream) -> anyhow::Result<()> {
         // assert_eq!(self.state, PeerState::DataTransfer);
         // TODO: do choking
         *self.state.0.am_choking.lock().unwrap() = false;

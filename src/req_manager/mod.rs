@@ -17,7 +17,7 @@ mod req_preparer;
 
 pub const BLOCK_QUEUE_SIZE_MAX: usize = 20;
 /// how many pieces are in the queue at max
-pub(self) const MAX_PIECES_IN_PARALLEL: usize = 2;
+pub(self) const MAX_PIECES_IN_PARALLEL: usize = 5;
 
 /// A message sent by a local peer to this Manager
 #[derive(Debug, Clone)]

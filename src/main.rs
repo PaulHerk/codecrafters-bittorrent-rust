@@ -147,7 +147,7 @@ async fn main() -> anyhow::Result<()> {
             for &addr in response.peers.0.iter() {
                 let req_manager_tx = req_manager_tx.clone();
                 tokio::spawn(async move {
-                    let (mut peer, stream) =
+                    let (peer, stream) =
                         Peer::connect_from_addr(addr, info_hash.clone(), *PEER_ID, req_manager_tx)
                             .await
                             .context("initializing peer")
@@ -164,7 +164,7 @@ async fn main() -> anyhow::Result<()> {
                 let Ok((stream, _addr)) = connection else {
                     continue;
                 };
-                let (mut peer, stream) =
+                let (peer, stream) =
                     Peer::connect_from_stream(stream, info_hash, *PEER_ID, req_manager_tx.clone())
                         .await
                         .context("initializing incoming peer connection")

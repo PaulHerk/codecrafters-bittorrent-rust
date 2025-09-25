@@ -40,7 +40,6 @@ impl ReqManager {
             self.handle_piece(&piece_state).await?;
             self.inform_peers(piece_state.piece_i).await?;
 
-            self.handle_finish().await?;
             Ok(Some(piece_state.piece_i))
         } else {
             Ok(None)
@@ -97,13 +96,14 @@ impl ReqManager {
         Some(res)
     }
 
-    async fn inform_peers(&self, piece_i: u32) -> anyhow::Result<()> {
+    async fn inform_peers(&mut self, piece_i: u32) -> anyhow::Result<()> {
         for (_peer_id, conn) in self.peers.iter() {
             conn.sender
                 .send(super::ResMessage::FinishedPiece(piece_i))
                 .await
                 .context("informing peer that we've finished piece")?;
         }
+        self.handle_finish().await?;
 
         Ok(())
     }
