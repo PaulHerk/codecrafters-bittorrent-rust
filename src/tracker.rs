@@ -1,3 +1,5 @@
+use anyhow::Context;
+use reqwest::Url;
 use serde::{Deserialize, Serialize};
 
 use crate::tracker::peers::PeerConnections;
@@ -38,16 +40,35 @@ impl<'a> TrackerRequest<'a> {
             compact: 1, // TODO
         }
     }
-    pub fn to_url_encoded(&self) -> String {
+    fn to_url_encoded(&self) -> String {
         let mut url_encoded = String::new();
-        url_encoded.push_str(&format!("info_hash={}", escape_bytes_url(&self.info_hash)));
-        url_encoded.push_str(&format!("&peer_id={}", escape_bytes_url(&self.peer_id)));
+        url_encoded.push_str(&format!("info_hash={}", escape_bytes_url(self.info_hash)));
+        url_encoded.push_str(&format!("&peer_id={}", escape_bytes_url(self.peer_id)));
         url_encoded.push_str(&format!("&port={}", self.port));
         url_encoded.push_str(&format!("&uploaded={}", self.uploaded));
         url_encoded.push_str(&format!("&downloaded={}", self.downloaded));
         url_encoded.push_str(&format!("&left={}", self.left));
         url_encoded.push_str(&format!("&compact={}", self.compact));
         url_encoded
+    }
+
+    pub async fn get_response(&self, announce_url: &str) -> anyhow::Result<TrackerResponse> {
+        let mut url = Url::parse(announce_url).context("parse url")?;
+        url.set_query(Some(&self.to_url_encoded()));
+
+        let client = reqwest::Client::builder()
+        .user_agent(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:142.0) Gecko/20100101 Firefox/142.0",
+        )
+        .build()?;
+        let response = client.get(url).send().await.context("send request")?;
+        let response_bytes = response
+            .bytes()
+            .await
+            .context("get tracker response bytes")?;
+
+        serde_bencode::from_bytes::<TrackerResponse>(&response_bytes)
+            .context("deserialize tracker response")
     }
 }
 

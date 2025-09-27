@@ -1,8 +1,6 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use codecrafters_bittorrent::conn::Peer;
-use codecrafters_bittorrent::*;
-use reqwest::Url;
+use codecrafters_bittorrent::{Peer, ReqManager, Torrent, TrackerRequest};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::path::PathBuf;
 use tokio::sync::mpsc;
@@ -72,7 +70,10 @@ async fn main() -> anyhow::Result<()> {
         }
         DecodeMetadataType::Peers { torrent } => {
             let torrent = Torrent::read_from_file(torrent)?;
-            let response = get_response(&torrent, &torrent.info_hash()).await?;
+            let info_hash = torrent.info_hash();
+            let tracker_req =
+                TrackerRequest::new(&info_hash, PEER_ID, PEER_PORT, torrent.get_length());
+            let response = tracker_req.get_response(&torrent.announce).await?;
             for peer in response.peers.0 {
                 println!("{peer:?}");
             }
@@ -138,7 +139,8 @@ async fn main() -> anyhow::Result<()> {
             let torrent = &req_manager.torrent;
 
             let info_hash = torrent.info_hash();
-            let response = get_response(&torrent, &info_hash).await?;
+            let tracker = TrackerRequest::new(&info_hash, PEER_ID, PEER_PORT, torrent.get_length());
+            let response = tracker.get_response(&torrent.announce).await?;
 
             tokio::spawn(async move {
                 let _ = req_manager.run().await;
@@ -148,7 +150,7 @@ async fn main() -> anyhow::Result<()> {
                 let req_manager_tx = req_manager_tx.clone();
                 tokio::spawn(async move {
                     let (peer, stream) =
-                        Peer::connect_from_addr(addr, info_hash.clone(), *PEER_ID, req_manager_tx)
+                        Peer::connect_from_addr(addr, info_hash, *PEER_ID, req_manager_tx)
                             .await
                             .context("initializing peer")
                             .unwrap();
@@ -175,25 +177,4 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
-}
-
-async fn get_response(torrent: &Torrent, info_hash: &[u8; 20]) -> anyhow::Result<TrackerResponse> {
-    let request = TrackerRequest::new(info_hash, PEER_ID, PEER_PORT, torrent.get_length());
-
-    let mut url = Url::parse(&torrent.announce).context("parse url")?;
-    url.set_query(Some(&request.to_url_encoded()));
-
-    let client = reqwest::Client::builder()
-        .user_agent(
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:142.0) Gecko/20100101 Firefox/142.0",
-        )
-        .build()?;
-    let response = client.get(url).send().await.context("send request")?;
-    let response_bytes = response
-        .bytes()
-        .await
-        .context("get tracker response bytes")?;
-
-    serde_bencode::from_bytes::<TrackerResponse>(&response_bytes)
-        .context("deserialize tracker response")
 }

@@ -3,13 +3,14 @@ use tokio::sync::mpsc;
 
 use anyhow::Context;
 
-use crate::conn::{BoxedMsgStream, Peer};
-use crate::messages::payloads::*;
-use crate::{messages::*, *};
+use crate::Peer;
+use crate::messages::PeerMessage;
+use crate::messages::payloads::{HavePayload, NoPayload};
+use crate::peer::conn::BoxedMsgStream;
+use crate::req_manager::{ReqMessage, ReqMsgFromPeer, ResMessage};
 
 pub mod conn;
 pub mod handshake;
-pub mod states;
 
 /// this enum is used to select between different stream-types a peer can receive
 #[derive(Debug, PartialEq)]
@@ -142,7 +143,7 @@ impl Peer {
                     && !*self.state.0.peer_choking.lock().unwrap()
                 {
                     for req in self.req_queue.iter() {
-                        let req_msg = PeerMessage::Request(req.clone());
+                        let req_msg = PeerMessage::Request(*req);
                         self.peer_writer.send(req_msg).await?;
                     }
                     blocks_left_for_queue = self.req_queue.len() as u32;
@@ -199,10 +200,6 @@ impl Peer {
             return false;
         }
 
-        if self.peer_writer.close().await.is_err() {
-            false
-        } else {
-            true
-        }
+        self.peer_writer.close().await.is_ok()
     }
 }

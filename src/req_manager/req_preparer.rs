@@ -1,7 +1,8 @@
 use rand::seq::IndexedRandom;
 
 use crate::{
-    BLOCK_MAX, RequestPiecePayload, Torrent,
+    BLOCK_MAX, Torrent,
+    messages::payloads::RequestPiecePayload,
     req_manager::{BlockState, MAX_PIECES_IN_PARALLEL, PieceState},
 };
 
@@ -20,7 +21,7 @@ impl ReqManager {
 
         // 1. Try if we have something in the download queue
         let piece_i = download_queue.iter().position(|state| {
-            let peer_has_it = peer_has[state.piece_i as usize] == true;
+            let peer_has_it = peer_has[state.piece_i as usize];
             let blocks_we_need = state.blocks.iter().filter(|b| b.is_none());
             // TODO: now currently if there's only one block remaining in the queue, it will return only that one
             // we might want to return that plus like 9 more of the next piece
@@ -28,10 +29,8 @@ impl ReqManager {
         });
 
         // 2. If not, add something to the queue: realistically rarest-first
-        if let None = piece_i {
-            if !self.add_piece_to_queue(&peer_has) {
-                return Vec::new();
-            };
+        if piece_i.is_none() && !self.add_piece_to_queue(&peer_has) {
+            return Vec::new();
         }
         drop(peer_has);
 
@@ -91,8 +90,7 @@ impl ReqManager {
             .zip(peer_has)
             .enumerate()
             .filter_map(|(index, (i_have, p_has))| {
-                if !*i_have && *p_has && queue.iter().find(|s| s.piece_i == index as u32).is_none()
-                {
+                if !*i_have && *p_has && !queue.iter().any(|s| s.piece_i == index as u32) {
                     Some(index as u32)
                 } else {
                     None

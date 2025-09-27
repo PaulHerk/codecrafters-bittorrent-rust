@@ -17,14 +17,14 @@ use tokio::sync::mpsc::Sender;
 use tokio_util::codec::Framed;
 use tokio_util::time::FutureExt;
 
-use crate::Handshake;
-use crate::MessageFramer;
-use crate::PeerConn;
-use crate::PeerMessage;
-use crate::ReqMsgFromPeer;
-use crate::RequestPiecePayload;
-use crate::ResMessage;
+use crate::messages::payloads::RequestPiecePayload;
+use crate::messages::{MessageFramer, PeerMessage};
 use crate::peer::Msg;
+use crate::peer::handshake::Handshake;
+use crate::req_manager::PeerConn;
+use crate::req_manager::ReqMessage;
+use crate::req_manager::ReqMsgFromPeer;
+use crate::req_manager::ResMessage;
 
 /// this is just a wrapper type for the actual states that wraps it in an Arc
 #[derive(Debug, Clone)]
@@ -110,7 +110,7 @@ impl Peer {
         req_manager_tx
             .send(ReqMsgFromPeer {
                 peer_id: peer_identifier.0.peer_id,
-                msg: crate::ReqMessage::NewConnection(peer_conn),
+                msg: ReqMessage::NewConnection(peer_conn),
             })
             .await
             .context("sending the new connection to the ReqManager")?;
@@ -147,9 +147,7 @@ async fn get_stream(framed_rx: PeerReader, req_manager_rx: Receiver<ResMessage>)
 
     // this is the stream sent by other connections to peers to send have messages
     let manager_stream = unfold(req_manager_rx, |mut rx| async move {
-        let Some(msg) = rx.recv().await else {
-            return None;
-        };
+        let msg = rx.recv().await?;
         Some((Msg::ManagerMsg(msg), rx))
     });
 

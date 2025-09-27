@@ -5,7 +5,9 @@ use sha1::{Digest, Sha1};
 
 use super::{PieceState, ReqManager};
 use crate::{
-    BLOCK_MAX, RequestPiecePayload, ResponsePiecePayload, Torrent, req_manager::BlockState,
+    BLOCK_MAX, Torrent,
+    messages::payloads::{RequestPiecePayload, ResponsePiecePayload},
+    req_manager::BlockState,
 };
 
 impl ReqManager {
@@ -68,9 +70,9 @@ impl ReqManager {
     async fn write_piece_to_file(&mut self, piece_state: &PieceState) -> anyhow::Result<()> {
         let offset = piece_state.piece_i as u64 * self.torrent.info.piece_length as u64;
 
-        let mut buf = &piece_state.buf[..];
+        let buf = &piece_state.buf[..];
         self.file
-            .write_all_at(&mut buf, offset)
+            .write_all_at(buf, offset)
             .context("writing piece to file")?;
 
         Ok(())

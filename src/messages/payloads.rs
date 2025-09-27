@@ -7,7 +7,7 @@ pub trait Payload {
 #[derive(Debug, Clone, PartialEq)]
 pub struct BitfieldPayload {
     /// a bitfield with each index that downloader has sent set to one and the rest set to zero
-    pub pieces_available: Vec<bool>,
+    pub(crate) pieces_available: Vec<bool>,
 }
 impl BitfieldPayload {
     pub(crate) fn is_nothing(&self) -> bool {
@@ -42,9 +42,9 @@ impl Payload for BitfieldPayload {
 #[derive(Debug, Clone, Copy, bincode::Encode, bincode::Decode, PartialEq)]
 pub struct RequestPiecePayload {
     /// the index of the piece
-    pub index: u32,
-    pub begin: u32,
-    pub length: u32,
+    pub(crate) index: u32,
+    pub(crate) begin: u32,
+    pub(crate) length: u32,
 }
 
 impl RequestPiecePayload {
@@ -74,9 +74,9 @@ impl Payload for RequestPiecePayload {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResponsePiecePayload {
-    pub index: u32,
-    pub begin: u32,
-    pub block: Vec<u8>,
+    pub(crate) index: u32,
+    pub(crate) begin: u32,
+    pub(crate) block: Vec<u8>,
 }
 
 impl Payload for ResponsePiecePayload {

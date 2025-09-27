@@ -1,27 +1,19 @@
-pub mod database;
-pub mod messages;
-pub mod peer;
+mod database;
+mod messages;
+mod peer;
 mod req_manager;
-pub mod torrent;
-pub mod tracker;
+mod torrent;
+mod tracker;
 
+pub use peer::conn::Peer;
+pub use req_manager::ReqManager;
 use std::collections::HashMap;
+pub use torrent::Torrent;
+pub use tracker::TrackerRequest;
 
-pub use database::*;
-pub use messages::payloads::*;
-pub use messages::*;
-pub use peer::handshake::*;
-// pub use peer::peer_data::*;
-pub use peer::states::*;
-pub use peer::*;
-pub use req_manager::*;
-use tokio_util::codec::Framed;
-pub use torrent::*;
-pub use tracker::*;
+pub(crate) const BLOCK_MAX: u32 = 1 << 14;
 
-pub const BLOCK_MAX: u32 = 1 << 14;
-
-pub type MsgFrameType = Framed<tokio::net::TcpStream, MessageFramer>;
+// pub(crate) type MsgFrameType = Framed<tokio::net::TcpStream, MessageFramer>;
 
 pub struct BittorrentClient {
     pub torrents: Vec<Torrent>,

@@ -1,13 +1,11 @@
 use bytes::BufMut;
 use bytes::{Buf, BytesMut};
+use payloads::*;
 use serde_repr::Deserialize_repr;
 use tokio_util::codec::Decoder;
 use tokio_util::codec::Encoder;
 
-use crate::{
-    BitfieldPayload, HavePayload, NoPayload, Payload, RequestPiecePayload, ResponsePiecePayload,
-};
-pub mod payloads;
+pub(crate) mod payloads;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PeerMessage {
@@ -24,7 +22,7 @@ pub enum PeerMessage {
 }
 
 impl PeerMessage {
-    pub fn to_be_bytes(&self) -> Vec<u8> {
+    fn to_be_bytes(&self) -> Vec<u8> {
         match self {
             PeerMessage::Choke(payload) => payload.to_be_bytes(),
             PeerMessage::Unchoke(payload) => payload.to_be_bytes(),
@@ -68,7 +66,7 @@ pub enum MessageType {
     Cancel = 8,
 }
 
-pub struct MessageFramer;
+pub(crate) struct MessageFramer;
 
 const MAX: u32 = 8 * 1024 * 1024;
 
@@ -175,7 +173,7 @@ impl Encoder<PeerMessage> for MessageFramer {
         if length as u32 > MAX {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("Frame of length {} is too large.", length),
+                format!("Frame of length {length} is too large."),
             ));
         }
 

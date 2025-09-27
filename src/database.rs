@@ -17,11 +17,11 @@ use crate::Torrent;
 /// the actual data stored in the DB
 /// torrent path is also the key
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct FileInfo {
-    pub bitfield: Cow<'static, [bool]>,
-    pub file: Cow<'static, Path>,
+pub(crate) struct FileInfo {
+    pub(crate) bitfield: Cow<'static, [bool]>,
+    pub(crate) file: Cow<'static, Path>,
     // TODO: don't store path, rather the content
-    pub torrent: Cow<'static, Path>,
+    pub(crate) torrent: Cow<'static, Path>,
 }
 
 impl FileInfo {
@@ -33,7 +33,7 @@ impl FileInfo {
         }
     }
 
-    pub fn is_finished(&self) -> bool {
+    pub(crate) fn is_finished(&self) -> bool {
         self.bitfield.iter().all(|b| *b)
     }
 }
@@ -44,16 +44,16 @@ struct Record {
     id: RecordId,
 }
 #[derive(Debug, Clone)]
-pub struct DBConnection(pub Surreal<Db>);
+pub(crate) struct DBConnection(pub(crate) Surreal<Db>);
 
 impl DBConnection {
-    pub async fn new() -> anyhow::Result<Self> {
+    pub(crate) async fn new() -> anyhow::Result<Self> {
         let db = Surreal::new::<RocksDb>("files").await?;
         db.use_ns("files_ns").use_db("files_db").await?;
         Ok(Self(db))
     }
 
-    pub async fn set_and_get_file(
+    pub(crate) async fn set_and_get_file(
         &self,
         file_path: Option<PathBuf>,
         torrent_path: PathBuf,

@@ -8,8 +8,10 @@ use anyhow::Context;
 use tokio::sync::mpsc;
 
 use crate::{
-    BitfieldPayload, DBConnection, RequestPiecePayload, ResponsePiecePayload, Torrent,
-    conn::PeerState,
+    Torrent,
+    database::DBConnection,
+    messages::payloads::{BitfieldPayload, RequestPiecePayload, ResponsePiecePayload},
+    peer::conn::PeerState,
 };
 
 mod file_manager;
@@ -17,7 +19,7 @@ mod req_preparer;
 
 pub const BLOCK_QUEUE_SIZE_MAX: usize = 20;
 /// how many pieces are in the queue at max
-pub(self) const MAX_PIECES_IN_PARALLEL: usize = 5;
+const MAX_PIECES_IN_PARALLEL: usize = 5;
 
 /// A message sent by a local peer to this Manager
 #[derive(Debug, Clone)]
