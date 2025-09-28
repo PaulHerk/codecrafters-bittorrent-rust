@@ -5,7 +5,7 @@ mod req_manager;
 mod torrent;
 mod tracker;
 
-pub use peer::conn::Peer;
+pub use peer::Peer;
 pub use req_manager::ReqManager;
 use std::collections::HashMap;
 pub use torrent::Torrent;

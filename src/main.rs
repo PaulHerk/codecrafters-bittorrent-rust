@@ -81,8 +81,9 @@ async fn main() -> anyhow::Result<()> {
         DecodeMetadataType::Handshake { torrent, addr } => {
             let torrent = Torrent::read_from_file(torrent)?;
             let (tx, _rx) = mpsc::channel(1);
-            let _peer = Peer::connect_from_addr(*addr, torrent.info_hash(), *PEER_ID, tx).await?;
-            println!("Peer connected");
+            let (peer, _stream) =
+                Peer::connect_from_addr(*addr, torrent.info_hash(), *PEER_ID, tx).await?;
+            println!("Peer with id {:?} connected", peer.get_id());
         }
         DecodeMetadataType::DownloadPiece {
             output: _,
@@ -154,7 +155,7 @@ async fn main() -> anyhow::Result<()> {
                             .await
                             .context("initializing peer")
                             .unwrap();
-                    peer.event_loop(stream).await.unwrap();
+                    peer.run(stream).await.unwrap();
                 });
             }
 
@@ -171,7 +172,7 @@ async fn main() -> anyhow::Result<()> {
                         .await
                         .context("initializing incoming peer connection")
                         .unwrap();
-                peer.event_loop(stream).await.unwrap();
+                peer.run(stream).await.unwrap();
             }
         }
     }

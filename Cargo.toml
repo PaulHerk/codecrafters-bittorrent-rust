@@ -33,3 +33,4 @@ thiserror = "1.0.38" # error handling
 tokio = { version = "1.23.0", features = ["full"] } # async http requests
 tokio-util = { version = "0.7.16", features = ["full"] }
 tracing-mutex = "0.3.2"
+url = { version = "2.5.7", default-features = false }

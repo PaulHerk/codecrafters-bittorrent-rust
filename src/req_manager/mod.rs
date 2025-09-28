@@ -4,7 +4,6 @@ use std::{
     path::PathBuf,
 };
 
-use anyhow::Context;
 use tokio::sync::mpsc;
 
 use crate::{
@@ -12,8 +11,10 @@ use crate::{
     database::DBConnection,
     messages::payloads::{BitfieldPayload, RequestPiecePayload, ResponsePiecePayload},
     peer::conn::PeerState,
+    req_manager::error::ReqManagerError,
 };
 
+mod error;
 mod file_manager;
 mod req_preparer;
 
@@ -108,7 +109,7 @@ impl ReqManager {
         rx: mpsc::Receiver<ReqMsgFromPeer>,
         file_path: Option<PathBuf>,
         torrent_path: PathBuf,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self, ReqManagerError> {
         let db_conn = DBConnection::new().await?;
         let torrent = Torrent::read_from_file(&torrent_path)?;
         let file_info = db_conn
@@ -120,7 +121,10 @@ impl ReqManager {
             .append(true)
             .truncate(false)
             .open(&file_info.file)
-            .context("opening file")?;
+            .map_err(|error| ReqManagerError::OpenError {
+                path: file_info.file.to_path_buf(),
+                error,
+            })?;
 
         let download_state = if file_info.is_finished() {
             None
@@ -141,37 +145,23 @@ impl ReqManager {
         })
     }
 
-    pub async fn run(&mut self) -> anyhow::Result<()> {
+    pub async fn run(mut self) -> anyhow::Result<()> {
         while let Some(peer_msg) = self.rx.recv().await {
-            let Some(peer) = self.peers.get(&peer_msg.peer_id) else {
-                // insert it if the message is a NewConnection, otherwise ignore it
-                if let ReqMessage::NewConnection(peer_conn) = peer_msg.msg {
+            match peer_msg.msg {
+                ReqMessage::NewConnection(peer_conn) => {
                     self.peers.insert(peer_msg.peer_id, peer_conn);
                 }
-                continue;
-            };
-            match peer_msg.msg {
-                ReqMessage::NewConnection(_peer_conn) => (
-                                // we already inserted it
-                            ),
                 ReqMessage::GotBlock(block) => {
                     if let Some(piece_index) = self.write_block(block).await? {
-                        self.peers
-                            .get(&peer_msg.peer_id)
-                            .expect("we checked that before")
-                            .sender
-                            .send(ResMessage::FinishedPiece(piece_index))
-                            .await
-                            .context("sending have message to local peers")?;
+                        let msg = ResMessage::FinishedPiece(piece_index);
+                        self.send_peer(&peer_msg.peer_id, msg).await?;
                     };
                 }
                 ReqMessage::NeedBlock(block) => {
                     if self.have[block.index as usize] {
                         let block = self.get_block(block);
-                        peer.sender
-                            .send(ResMessage::Block(block))
-                            .await
-                            .context("sending block to peer")?;
+                        let msg = ResMessage::Block(block);
+                        self.send_peer(&peer_msg.peer_id, msg).await?;
                     } else {
                         todo!(
                             "send a message to the peer that we don't have the block? (not sure if there's a message type for this)"
@@ -179,27 +169,51 @@ impl ReqManager {
                     }
                 }
                 ReqMessage::NeedBlockQueue => {
-                    let peer_has = peer.identifier.0.has.lock().unwrap().clone();
+                    let peer_has = self.get_peer_has(&peer_msg.peer_id)?;
                     let blocks = self.prepare_next_blocks(BLOCK_QUEUE_SIZE_MAX, peer_has);
-                    self.peers
-                        .get(&peer_msg.peer_id)
-                        .expect("we checked that before, just need mutable reference again")
-                        .sender
-                        .send(ResMessage::NewBlockQueue(blocks))
-                        .await
-                        .context("sending block queue")?;
+                    let msg = ResMessage::NewBlockQueue(blocks);
+                    self.send_peer(&peer_msg.peer_id, msg).await?;
                 }
                 ReqMessage::WhatDoWeHave => {
-                    peer.sender
-                        .send(ResMessage::WeHave(BitfieldPayload {
-                            pieces_available: self.have.clone(),
-                        }))
-                        .await
-                        .context("send have")?;
+                    let msg = ResMessage::WeHave(BitfieldPayload {
+                        pieces_available: self.have.clone(),
+                    });
+                    self.send_peer(&peer_msg.peer_id, msg).await?;
                 }
             }
         }
 
         Ok(())
+    }
+
+    async fn send_peer(
+        &mut self,
+        peer_id: &[u8; 20],
+        msg: ResMessage,
+    ) -> Result<(), ReqManagerError> {
+        let peer = self
+            .peers
+            .get_mut(peer_id)
+            .ok_or(ReqManagerError::PeerNotFound)?;
+        peer.sender
+            .send(msg)
+            .await
+            .map_err(|error| ReqManagerError::SendError {
+                peer_id: *peer_id,
+                error,
+            })
+    }
+
+    fn get_peer_has(&self, peer_id: &[u8; 20]) -> Result<Vec<bool>, ReqManagerError> {
+        Ok(self
+            .peers
+            .get(peer_id)
+            .ok_or(ReqManagerError::PeerNotFound)?
+            .identifier
+            .0
+            .has
+            .lock()
+            .unwrap()
+            .clone())
     }
 }

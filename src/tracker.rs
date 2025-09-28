@@ -1,6 +1,6 @@
-use anyhow::Context;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use crate::tracker::peers::PeerConnections;
 
@@ -52,8 +52,11 @@ impl<'a> TrackerRequest<'a> {
         url_encoded
     }
 
-    pub async fn get_response(&self, announce_url: &str) -> anyhow::Result<TrackerResponse> {
-        let mut url = Url::parse(announce_url).context("parse url")?;
+    pub async fn get_response(
+        &self,
+        announce_url: &str,
+    ) -> Result<TrackerResponse, TrackerRequestError> {
+        let mut url = Url::parse(announce_url)?;
         url.set_query(Some(&self.to_url_encoded()));
 
         let client = reqwest::Client::builder()
@@ -61,14 +64,15 @@ impl<'a> TrackerRequest<'a> {
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:142.0) Gecko/20100101 Firefox/142.0",
         )
         .build()?;
-        let response = client.get(url).send().await.context("send request")?;
-        let response_bytes = response
-            .bytes()
-            .await
-            .context("get tracker response bytes")?;
+        let response = client.get(url).send().await?;
+        let response_bytes = response.bytes().await?;
 
-        serde_bencode::from_bytes::<TrackerResponse>(&response_bytes)
-            .context("deserialize tracker response")
+        serde_bencode::from_bytes::<TrackerResponse>(&response_bytes).map_err(|des_err| {
+            TrackerRequestError::InvalidResponse {
+                error: des_err,
+                response: response_bytes,
+            }
+        })
     }
 }
 
@@ -185,3 +189,16 @@ mod peers {
 //         // TODO: error handling (IP address or dns name as a string)
 //     }
 // }
+
+#[derive(Error, Debug)]
+pub enum TrackerRequestError {
+    #[error("Failed to parse announce url: `{0}`")]
+    InvalidUrl(#[from] url::ParseError),
+    #[error("Failed with error: `{error}` to deserialize tracker response: `{response:?}`")]
+    InvalidResponse {
+        error: serde_bencode::Error,
+        response: bytes::Bytes,
+    },
+    #[error("Something failed with requesting the tracker-response: `{0}`")]
+    ReqwestError(#[from] reqwest::Error),
+}

@@ -1,9 +1,9 @@
 use std::{collections::HashMap, path::PathBuf};
 
-use anyhow::Context;
 pub use hashes::Hashes;
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
+use thiserror::Error;
 
 mod hashes {
     use serde::de::{self, Visitor};
@@ -70,17 +70,19 @@ pub struct Torrent {
 }
 
 impl Torrent {
-    pub fn read_from_file(path: &PathBuf) -> anyhow::Result<Self> {
-        let bytes = std::fs::read(path).context("read torrent file")?;
-        let torrent = serde_bencode::from_bytes::<Torrent>(&bytes).context("decode torrent")?;
+    pub fn read_from_file(path: &PathBuf) -> Result<Self, TorrentError> {
+        let bytes = std::fs::read(path).map_err(|error| TorrentError::IOReadError {
+            error,
+            path: path.clone(),
+        })?;
+        let torrent = serde_bencode::from_bytes::<Torrent>(&bytes)?;
 
         Ok(torrent)
     }
     pub fn info_hash(&self) -> [u8; 20] {
         let mut hasher = Sha1::new();
         let bytes = serde_bencode::to_bytes(&self.info)
-            .context("re-encode info")
-            .expect("If this doesn't work, the file provided is invalid");
+            .expect("If this doesn't work, the &self provided would be invalid");
         hasher.update(&bytes);
         let info_hash = hasher.finalize();
         info_hash.into()
@@ -139,4 +141,15 @@ pub struct File {
     /// A list of UTF-8 encoded strings corresponding to subdirectory names,
     /// the last of which is the actual file name (a zero length list is an error case).
     pub path: Vec<String>,
+}
+
+#[derive(Error, Debug)]
+pub enum TorrentError {
+    #[error("Failed with error `{error}` to read file with path `{path}`")]
+    IOReadError {
+        error: std::io::Error,
+        path: PathBuf,
+    },
+    #[error("Failed to deserialize the torrent bencode: `{0}`")]
+    InvalidBencode(#[from] serde_bencode::Error),
 }

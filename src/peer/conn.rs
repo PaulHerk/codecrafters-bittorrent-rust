@@ -17,9 +17,9 @@ use tokio::sync::mpsc::Sender;
 use tokio_util::codec::Framed;
 use tokio_util::time::FutureExt;
 
-use crate::messages::payloads::RequestPiecePayload;
 use crate::messages::{MessageFramer, PeerMessage};
 use crate::peer::Msg;
+use crate::peer::Peer;
 use crate::peer::handshake::Handshake;
 use crate::req_manager::PeerConn;
 use crate::req_manager::ReqMessage;
@@ -32,15 +32,15 @@ pub(crate) struct PeerState(pub(crate) Arc<PeerStateInner>);
 
 #[derive(Debug)]
 pub(crate) struct PeerStateInner {
-    pub peer_id: [u8; 20],
+    pub(crate) peer_id: [u8; 20],
     // dk if I need this at all
     // pub state: Arc<Mutex<super::PeerState>>,
-    pub am_choking: Mutex<bool>,
-    pub am_interested: Mutex<bool>,
-    pub peer_choking: Mutex<bool>,
-    pub peer_interested: Mutex<bool>,
+    pub(crate) am_choking: Mutex<bool>,
+    pub(crate) am_interested: Mutex<bool>,
+    pub(crate) peer_choking: Mutex<bool>,
+    pub(crate) peer_interested: Mutex<bool>,
     /// the bitfield of the other peer
-    pub has: Mutex<Vec<bool>>,
+    pub(crate) has: Mutex<Vec<bool>>,
 }
 
 impl PeerState {
@@ -58,15 +58,8 @@ impl PeerState {
 }
 
 pub(super) type BoxedMsgStream = Pin<Box<dyn Stream<Item = Msg> + Send>>;
-type PeerWriter = SplitSink<Framed<TcpStream, MessageFramer>, PeerMessage>;
+pub(super) type PeerWriter = SplitSink<Framed<TcpStream, MessageFramer>, PeerMessage>;
 type PeerReader = SplitStream<Framed<TcpStream, MessageFramer>>;
-
-pub struct Peer {
-    pub(super) state: PeerState,
-    pub(super) req_queue: Vec<RequestPiecePayload>,
-    pub(super) req_manager_tx: mpsc::Sender<ReqMsgFromPeer>,
-    pub(super) peer_writer: PeerWriter,
-}
 
 impl Peer {
     pub async fn connect_from_addr(

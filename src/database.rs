@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::path::Path;
 use std::path::PathBuf;
 
-use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use surrealdb::RecordId;
 use surrealdb::Surreal;
@@ -11,6 +10,7 @@ use surrealdb::opt::PatchOp;
 
 // For a RocksDB file
 use surrealdb::engine::local::RocksDb;
+use thiserror::Error;
 
 use crate::Torrent;
 
@@ -47,7 +47,7 @@ struct Record {
 pub(crate) struct DBConnection(pub(crate) Surreal<Db>);
 
 impl DBConnection {
-    pub(crate) async fn new() -> anyhow::Result<Self> {
+    pub(crate) async fn new() -> Result<DBConnection, DBError> {
         let db = Surreal::new::<RocksDb>("files").await?;
         db.use_ns("files_ns").use_db("files_db").await?;
         Ok(Self(db))
@@ -58,7 +58,7 @@ impl DBConnection {
         file_path: Option<PathBuf>,
         torrent_path: PathBuf,
         torrent: &Torrent,
-    ) -> anyhow::Result<FileInfo> {
+    ) -> Result<FileInfo, DBError> {
         // read the torrent file
         let info_hash_hex = &hex::encode(torrent.info_hash());
         // get the file path, create a new entry and insert it
@@ -101,13 +101,12 @@ impl DBConnection {
         &mut self,
         info_hash: &str,
         new_bitfield: Vec<bool>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), DBError> {
         let updated: Option<FileInfo> = self
             .0
             .update(("files", info_hash))
             .patch(PatchOp::replace("/bitfield", new_bitfield))
-            .await
-            .context("Updating the DB entry.")?;
+            .await?;
         dbg!(&updated);
 
         assert!(
@@ -117,4 +116,10 @@ impl DBConnection {
 
         Ok(())
     }
+}
+
+#[derive(Error, Debug)]
+pub(crate) enum DBError {
+    #[error("Got error from the local DB: `{0}`")]
+    DBError(#[from] surrealdb::Error),
 }
