@@ -150,7 +150,7 @@ async fn get_stream(
     // this is the stream sent by other connections to peers to send have messages
     let manager_stream = unfold(peer_manager_rx, |mut rx| async move {
         let msg = rx.recv().await?;
-        Some((Msg::ManagerMsg(msg), rx))
+        Some((Msg::Manager(msg), rx))
     });
 
     let stream = futures_util::stream::select(peer_msg_stream, manager_stream);

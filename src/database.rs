@@ -121,5 +121,11 @@ impl DBConnection {
 #[derive(Error, Debug)]
 pub enum DBError {
     #[error("Got error from the local DB: `{0}`")]
-    DBError(#[from] surrealdb::Error),
+    DBError(Box<surrealdb::Error>),
+}
+
+impl From<surrealdb::Error> for DBError {
+    fn from(value: surrealdb::Error) -> Self {
+        Self::DBError(Box::new(value))
+    }
 }

@@ -19,7 +19,7 @@ pub mod handshake;
 #[derive(Debug, PartialEq)]
 pub enum Msg {
     /// this will be sent to other peers in order to announce that it has the piece
-    ManagerMsg(ResMessage),
+    Manager(ResMessage),
     Data(PeerMessage),
     Timeout,
 }

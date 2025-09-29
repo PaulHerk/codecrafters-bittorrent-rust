@@ -29,7 +29,7 @@ impl Peer {
                     // dbg!(&message);
                 }
                 match message {
-                    Msg::ManagerMsg(peer_msg) => match peer_msg {
+                    Msg::Manager(peer_msg) => match peer_msg {
                         ResMessage::FinishedFile => {
                             // TODO: set flags
                             if self.sever_conn().await {
@@ -122,7 +122,7 @@ impl Peer {
                     && !*self.state.0.peer_choking.lock().unwrap()
                 {
                     // I don't like doing this, however self.send_peer() takes a mut ref to self and thus I can't iterate over self.req_queue at the same time
-                    let queue_iter: Vec<_> = self.req_queue.iter().cloned().collect();
+                    let queue_iter: Vec<_> = self.req_queue.to_vec();
                     for req in queue_iter {
                         let req_msg = PeerMessage::Request(req);
                         self.send_peer(req_msg).await?;
