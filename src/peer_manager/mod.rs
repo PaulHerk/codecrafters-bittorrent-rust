@@ -145,7 +145,7 @@ impl PeerManager {
         })
     }
 
-    pub async fn run(mut self) -> anyhow::Result<()> {
+    pub async fn run(mut self) -> Result<(), PeerManagerError> {
         while let Some(peer_msg) = self.rx.recv().await {
             match peer_msg.msg {
                 ReqMessage::NewConnection(peer_conn) => {

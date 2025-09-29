@@ -27,6 +27,7 @@ pub struct Peer {
     req_queue: Vec<RequestPiecePayload>,
     req_manager_tx: mpsc::Sender<ReqMsgFromPeer>,
     peer_writer: PeerWriter,
+    // this is an Option because the event-loop takes the Stream and leaves a None in its place while running
     receiver_stream: Option<BoxedMsgStream>,
 }
 
