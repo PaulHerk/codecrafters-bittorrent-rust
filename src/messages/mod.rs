@@ -36,7 +36,7 @@ impl PeerMessage {
             PeerMessage::KeepAlive(payload) => payload.to_be_bytes(),
         }
     }
-    fn get_msg_type(&self) -> Option<MessageType> {
+    pub(crate) fn get_msg_type(&self) -> Option<MessageType> {
         match self {
             PeerMessage::Choke(_) => Some(MessageType::Choke),
             PeerMessage::Unchoke(_) => Some(MessageType::Unchoke),

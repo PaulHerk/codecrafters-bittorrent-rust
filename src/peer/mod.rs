@@ -1,16 +1,16 @@
 use futures_util::{self, SinkExt};
 use tokio::sync::mpsc;
 
-use anyhow::Context;
-
 use crate::messages::PeerMessage;
 use crate::messages::payloads::NoPayload;
 use crate::messages::payloads::RequestPiecePayload;
 use crate::peer::conn::PeerWriter;
 use crate::peer::conn::{BoxedMsgStream, PeerState};
+use crate::peer::error::PeerError;
 use crate::peer_manager::{ReqMessage, ReqMsgFromPeer, ResMessage};
 
 pub mod conn;
+mod error;
 mod event_loop;
 pub mod handshake;
 
@@ -33,20 +33,30 @@ impl Peer {
     pub fn get_id(&self) -> [u8; 20] {
         self.state.0.peer_id
     }
-    async fn send_req_manager(
-        &self,
-        msg: ReqMessage,
-    ) -> Result<(), mpsc::error::SendError<ReqMsgFromPeer>> {
+    async fn send_peer_manager(&self, msg: ReqMessage) -> Result<(), PeerError> {
+        let peer_id = self.get_id();
         self.req_manager_tx
-            .send(ReqMsgFromPeer {
-                peer_id: self.state.0.peer_id,
-                msg,
-            })
+            .send(ReqMsgFromPeer { peer_id, msg })
             .await
+            .map_err(|error| PeerError::SendToPeerManager { error, peer_id })
+    }
+    async fn send_peer(&mut self, msg: PeerMessage) -> Result<(), PeerError> {
+        let msg_type_str = msg
+            .get_msg_type()
+            .map(|msg_type| format!("{msg_type:?}"))
+            .unwrap_or("KeepAlive".to_string());
+        self.peer_writer
+            .send(msg)
+            .await
+            .map_err(|error| PeerError::SendToPeer {
+                error,
+                peer_id: self.get_id(),
+                msg_type_str,
+            })
     }
 
     /// this sets our interested flag and sends the message to the peer
-    async fn set_interested(&mut self, interested: bool) -> anyhow::Result<()> {
+    async fn set_interested(&mut self, interested: bool) -> Result<(), PeerError> {
         {
             let am_interested = &mut *self.state.0.am_interested.lock().unwrap();
             if interested != *am_interested {
@@ -62,11 +72,7 @@ impl Peer {
         } else {
             PeerMessage::NotInterested(NoPayload)
         };
-        self.peer_writer
-            .send(msg)
-            .await
-            .context("sending interested")?;
-        Ok(())
+        self.send_peer(msg).await
     }
 
     async fn sever_conn(&mut self) -> bool {

@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use anyhow::Context;
 use futures_core::Stream;
 use futures_util::StreamExt;
 use futures_util::stream::SplitSink;
@@ -20,6 +19,7 @@ use tokio_util::time::FutureExt;
 use crate::messages::{MessageFramer, PeerMessage};
 use crate::peer::Msg;
 use crate::peer::Peer;
+use crate::peer::error::PeerError;
 use crate::peer::handshake::Handshake;
 use crate::peer_manager::PeerConn;
 use crate::peer_manager::ReqMessage;
@@ -32,6 +32,7 @@ pub(crate) struct PeerState(pub(crate) Arc<PeerStateInner>);
 
 #[derive(Debug)]
 pub(crate) struct PeerStateInner {
+    /// the peer_id of the remote peer
     pub(crate) peer_id: [u8; 20],
     // dk if I need this at all
     // pub state: Arc<Mutex<super::PeerState>>,
@@ -67,11 +68,11 @@ impl Peer {
         info_hash: [u8; 20],
         peer_id: [u8; 20],
         req_manager_tx: Sender<ReqMsgFromPeer>,
-    ) -> anyhow::Result<(Self, BoxedMsgStream)> {
+    ) -> Result<(Self, BoxedMsgStream), PeerError> {
         // set up tcp connection & shake hands
         let tcp = tokio::net::TcpStream::connect(addr)
             .await
-            .context("establishing tcp connection")?;
+            .map_err(|error| PeerError::FailedToConnect { error, addr })?;
 
         Peer::connect_from_stream(tcp, info_hash, peer_id, req_manager_tx).await
     }
@@ -81,11 +82,10 @@ impl Peer {
         info_hash: [u8; 20],
         peer_id: [u8; 20],
         req_manager_tx: Sender<ReqMsgFromPeer>,
-    ) -> anyhow::Result<(Self, BoxedMsgStream)> {
+    ) -> Result<(Self, BoxedMsgStream), PeerError> {
         let handshake_recv = Handshake::new(info_hash, peer_id)
             .shake_hands(&mut tcp)
-            .await
-            .context("shaking hands with peer")?;
+            .await?;
         println!("peer {} connected", tcp.peer_addr().unwrap());
 
         let peer_identifier = PeerState::new(handshake_recv.peer_id);
@@ -100,13 +100,14 @@ impl Peer {
             sender,
             identifier: peer_identifier.clone(),
         };
+        let peer_id = peer_identifier.0.peer_id;
         req_manager_tx
             .send(ReqMsgFromPeer {
-                peer_id: peer_identifier.0.peer_id,
+                peer_id,
                 msg: ReqMessage::NewConnection(peer_conn),
             })
             .await
-            .context("sending the new connection to the PeerManager")?;
+            .map_err(|error| PeerError::SendToPeerManager { error, peer_id })?;
 
         let (peer_writer, peer_reader) = framed.split();
         let receiver_stream = get_stream(peer_reader, req_manager_rx).await;
