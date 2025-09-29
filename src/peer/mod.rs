@@ -27,6 +27,7 @@ pub struct Peer {
     req_queue: Vec<RequestPiecePayload>,
     req_manager_tx: mpsc::Sender<ReqMsgFromPeer>,
     peer_writer: PeerWriter,
+    receiver_stream: Option<BoxedMsgStream>,
 }
 
 impl Peer {

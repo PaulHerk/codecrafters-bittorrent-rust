@@ -1,3 +1,5 @@
+use std::mem;
+
 use futures_util::StreamExt;
 
 use crate::{
@@ -5,17 +7,19 @@ use crate::{
         PeerMessage,
         payloads::{HavePayload, NoPayload},
     },
-    peer::{BoxedMsgStream, Msg, Peer, error::PeerError},
+    peer::{Msg, Peer, error::PeerError},
     peer_manager::{ReqMessage, ResMessage},
 };
 
 impl Peer {
-    pub async fn run(mut self, mut receiver_stream: BoxedMsgStream) -> Result<(), PeerError> {
+    pub async fn run(mut self) -> Result<(), PeerError> {
         // TODO: do choking
         *self.state.0.am_choking.lock().unwrap() = false;
 
         let mut blocks_left_for_queue = 0_u32;
 
+        let mut receiver_stream = mem::take(&mut self.receiver_stream)
+            .expect("The receiver stream is initialized after creation of the peer.");
         // ask req_manager what we have
         self.send_peer_manager(ReqMessage::WhatDoWeHave).await?;
         loop {
@@ -131,6 +135,8 @@ impl Peer {
                 eprintln!("peer disconnected");
                 break Err(PeerError::PeerDisconnected);
             }
-        }
+        }?;
+        self.receiver_stream = Some(receiver_stream);
+        Ok(())
     }
 }

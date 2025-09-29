@@ -82,8 +82,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         DecodeMetadataType::Handshake { torrent, addr } => {
             let torrent = Torrent::read_from_file(torrent)?;
             let (tx, _rx) = mpsc::channel(1);
-            let (peer, _stream) =
-                Peer::connect_from_addr(*addr, torrent.info_hash(), *PEER_ID, tx).await?;
+            let peer = Peer::connect_from_addr(*addr, torrent.info_hash(), *PEER_ID, tx).await?;
             println!("Peer with id {:?} connected", peer.get_id());
         }
         DecodeMetadataType::DownloadPiece {
@@ -151,12 +150,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
             for &addr in response.peers.0.iter() {
                 let req_manager_tx = req_manager_tx.clone();
                 tokio::spawn(async move {
-                    let (peer, stream) =
-                        Peer::connect_from_addr(addr, info_hash, *PEER_ID, req_manager_tx)
-                            .await
-                            .context("initializing peer")
-                            .unwrap();
-                    peer.run(stream).await.unwrap();
+                    let peer = Peer::connect_from_addr(addr, info_hash, *PEER_ID, req_manager_tx)
+                        .await
+                        .context("initializing peer")
+                        .unwrap();
+                    peer.run().await.unwrap();
                 });
             }
 
@@ -168,12 +166,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let Ok((stream, _addr)) = connection else {
                     continue;
                 };
-                let (peer, stream) =
+                let peer =
                     Peer::connect_from_stream(stream, info_hash, *PEER_ID, req_manager_tx.clone())
                         .await
                         .context("initializing incoming peer connection")
                         .unwrap();
-                peer.run(stream).await.unwrap();
+                peer.run().await.unwrap();
             }
         }
     }

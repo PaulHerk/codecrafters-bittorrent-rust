@@ -58,7 +58,7 @@ impl PeerState {
     }
 }
 
-pub(super) type BoxedMsgStream = Pin<Box<dyn Stream<Item = Msg> + Send>>;
+pub(super) type BoxedMsgStream = Pin<Box<dyn Stream<Item = Msg> + Send + Sync>>;
 pub(super) type PeerWriter = SplitSink<Framed<TcpStream, MessageFramer>, PeerMessage>;
 type PeerReader = SplitStream<Framed<TcpStream, MessageFramer>>;
 
@@ -68,7 +68,7 @@ impl Peer {
         info_hash: [u8; 20],
         peer_id: [u8; 20],
         req_manager_tx: Sender<ReqMsgFromPeer>,
-    ) -> Result<(Self, BoxedMsgStream), PeerError> {
+    ) -> Result<Self, PeerError> {
         // set up tcp connection & shake hands
         let tcp = tokio::net::TcpStream::connect(addr)
             .await
@@ -82,7 +82,7 @@ impl Peer {
         info_hash: [u8; 20],
         peer_id: [u8; 20],
         req_manager_tx: Sender<ReqMsgFromPeer>,
-    ) -> Result<(Self, BoxedMsgStream), PeerError> {
+    ) -> Result<Self, PeerError> {
         let handshake_recv = Handshake::new(info_hash, peer_id)
             .shake_hands(&mut tcp)
             .await?;
@@ -110,17 +110,15 @@ impl Peer {
             .map_err(|error| PeerError::SendToPeerManager { error, peer_id })?;
 
         let (peer_writer, peer_reader) = framed.split();
-        let receiver_stream = get_stream(peer_reader, req_manager_rx).await;
+        let receiver_stream = Some(get_stream(peer_reader, req_manager_rx).await);
 
-        Ok((
-            Self {
-                state: peer_identifier,
-                req_queue: Vec::new(),
-                req_manager_tx,
-                peer_writer,
-            },
+        Ok(Self {
+            state: peer_identifier,
+            req_queue: Vec::new(),
+            req_manager_tx,
+            peer_writer,
             receiver_stream,
-        ))
+        })
     }
 }
 
