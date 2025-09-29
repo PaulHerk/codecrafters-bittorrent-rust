@@ -3,12 +3,12 @@ use rand::seq::IndexedRandom;
 use crate::{
     BLOCK_MAX, Torrent,
     messages::payloads::RequestPiecePayload,
-    req_manager::{BlockState, MAX_PIECES_IN_PARALLEL, PieceState},
+    peer_manager::{BlockState, MAX_PIECES_IN_PARALLEL, PieceState},
 };
 
-use super::ReqManager;
+use super::PeerManager;
 
-impl ReqManager {
+impl PeerManager {
     /// returns a list of blocks that we want to request
     pub(super) fn prepare_next_blocks(
         &mut self,

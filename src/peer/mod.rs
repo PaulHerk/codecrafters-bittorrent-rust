@@ -8,7 +8,7 @@ use crate::messages::payloads::NoPayload;
 use crate::messages::payloads::RequestPiecePayload;
 use crate::peer::conn::PeerWriter;
 use crate::peer::conn::{BoxedMsgStream, PeerState};
-use crate::req_manager::{ReqMessage, ReqMsgFromPeer, ResMessage};
+use crate::peer_manager::{ReqMessage, ReqMsgFromPeer, ResMessage};
 
 pub mod conn;
 mod event_loop;

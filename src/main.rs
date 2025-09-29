@@ -1,6 +1,7 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use codecrafters_bittorrent::{Peer, ReqManager, Torrent, TrackerRequest};
+use codecrafters_bittorrent::{Peer, PeerManager, Torrent, TrackerRequest};
+use std::error::Error;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::path::PathBuf;
 use tokio::sync::mpsc;
@@ -45,7 +46,7 @@ enum DecodeMetadataType {
 
 // Usage: your_program.sh decode "<encoded_value>"
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
 
     // You can check for the existence of subcommands, and if found use their
@@ -134,8 +135,8 @@ async fn main() -> anyhow::Result<()> {
         } => {
             let (req_manager_tx, req_manager_rx) = mpsc::channel(64);
 
-            let mut req_manager =
-                ReqManager::init(req_manager_rx, output.clone(), torrent_path.clone()).await?;
+            let req_manager =
+                PeerManager::init(req_manager_rx, output.clone(), torrent_path.clone()).await?;
 
             let torrent = &req_manager.torrent;
 

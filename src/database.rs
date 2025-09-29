@@ -119,7 +119,7 @@ impl DBConnection {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum DBError {
+pub enum DBError {
     #[error("Got error from the local DB: `{0}`")]
     DBError(#[from] surrealdb::Error),
 }

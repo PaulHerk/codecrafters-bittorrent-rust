@@ -21,10 +21,10 @@ use crate::messages::{MessageFramer, PeerMessage};
 use crate::peer::Msg;
 use crate::peer::Peer;
 use crate::peer::handshake::Handshake;
-use crate::req_manager::PeerConn;
-use crate::req_manager::ReqMessage;
-use crate::req_manager::ReqMsgFromPeer;
-use crate::req_manager::ResMessage;
+use crate::peer_manager::PeerConn;
+use crate::peer_manager::ReqMessage;
+use crate::peer_manager::ReqMsgFromPeer;
+use crate::peer_manager::ResMessage;
 
 /// this is just a wrapper type for the actual states that wraps it in an Arc
 #[derive(Debug, Clone)]
@@ -106,7 +106,7 @@ impl Peer {
                 msg: ReqMessage::NewConnection(peer_conn),
             })
             .await
-            .context("sending the new connection to the ReqManager")?;
+            .context("sending the new connection to the PeerManager")?;
 
         let (peer_writer, peer_reader) = framed.split();
         let receiver_stream = get_stream(peer_reader, req_manager_rx).await;

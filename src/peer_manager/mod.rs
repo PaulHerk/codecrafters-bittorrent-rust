@@ -11,7 +11,7 @@ use crate::{
     database::DBConnection,
     messages::payloads::{BitfieldPayload, RequestPiecePayload, ResponsePiecePayload},
     peer::conn::PeerState,
-    req_manager::error::ReqManagerError,
+    peer_manager::error::PeerManagerError,
 };
 
 mod error;
@@ -42,7 +42,7 @@ pub struct ReqMsgFromPeer {
 
 // Next-up:
 // - split it into ReqMessage and ResMessage (TODO: better naming)
-// - the ReqManager has access to all peers with a HashMap<PeerHash, mpsc::Sender<ResMessage>>, and maybe also the download speed
+// - the PeerManager has access to all peers with a HashMap<PeerHash, mpsc::Sender<ResMessage>>, and maybe also the download speed
 // - allows to implement:
 //  - rarest-first-piece-selection
 //  - peer not shutting down if the queue is empty, rather the Manager sends the shuttdown to all peers
@@ -59,7 +59,7 @@ pub enum ResMessage {
     FinishedFile,
 }
 
-pub struct ReqManager {
+pub struct PeerManager {
     /// the output file
     file: File,
     db_conn: DBConnection,
@@ -104,12 +104,12 @@ impl BlockState {
     }
 }
 
-impl ReqManager {
+impl PeerManager {
     pub async fn init(
         rx: mpsc::Receiver<ReqMsgFromPeer>,
         file_path: Option<PathBuf>,
         torrent_path: PathBuf,
-    ) -> Result<Self, ReqManagerError> {
+    ) -> Result<Self, PeerManagerError> {
         let db_conn = DBConnection::new().await?;
         let torrent = Torrent::read_from_file(&torrent_path)?;
         let file_info = db_conn
@@ -121,7 +121,7 @@ impl ReqManager {
             .append(true)
             .truncate(false)
             .open(&file_info.file)
-            .map_err(|error| ReqManagerError::OpenError {
+            .map_err(|error| PeerManagerError::OpenError {
                 path: file_info.file.to_path_buf(),
                 error,
             })?;
@@ -190,25 +190,26 @@ impl ReqManager {
         &mut self,
         peer_id: &[u8; 20],
         msg: ResMessage,
-    ) -> Result<(), ReqManagerError> {
+    ) -> Result<(), PeerManagerError> {
         let peer = self
             .peers
             .get_mut(peer_id)
-            .ok_or(ReqManagerError::PeerNotFound)?;
+            .ok_or(PeerManagerError::PeerNotFound)?;
         peer.sender
             .send(msg)
             .await
-            .map_err(|error| ReqManagerError::SendError {
+            .map_err(|error| PeerManagerError::SendError {
                 peer_id: *peer_id,
                 error,
+                msg: "Sending a message.".to_string(),
             })
     }
 
-    fn get_peer_has(&self, peer_id: &[u8; 20]) -> Result<Vec<bool>, ReqManagerError> {
+    fn get_peer_has(&self, peer_id: &[u8; 20]) -> Result<Vec<bool>, PeerManagerError> {
         Ok(self
             .peers
             .get(peer_id)
-            .ok_or(ReqManagerError::PeerNotFound)?
+            .ok_or(PeerManagerError::PeerNotFound)?
             .identifier
             .0
             .has

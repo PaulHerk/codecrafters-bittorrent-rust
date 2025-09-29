@@ -7,7 +7,7 @@ use crate::{
         payloads::{HavePayload, NoPayload},
     },
     peer::{BoxedMsgStream, Msg, Peer},
-    req_manager::{ReqMessage, ResMessage},
+    peer_manager::{ReqMessage, ResMessage},
 };
 
 impl Peer {
@@ -100,7 +100,7 @@ impl Peer {
                             PeerMessage::Request(request_piece_payload) => {
                                 self.send_req_manager(ReqMessage::NeedBlock(request_piece_payload))
                                     .await
-                                    .context("requesting ReqManager for block")?;
+                                    .context("requesting PeerManager for block")?;
                             }
                             PeerMessage::Piece(response_piece_payload) => {
                                 eprintln!(
@@ -109,7 +109,7 @@ impl Peer {
                                 );
                                 self.send_req_manager(ReqMessage::GotBlock(response_piece_payload))
                                     .await
-                                    .context("sending that we got block to ReqManager")?;
+                                    .context("sending that we got block to PeerManager")?;
                                 blocks_left_for_queue -= 1;
                             }
                             PeerMessage::Cancel(_request_piece_payload) => todo!(), // only for end-game, won't probably use it
