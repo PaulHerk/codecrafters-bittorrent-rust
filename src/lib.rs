@@ -17,7 +17,7 @@ pub(crate) const BLOCK_MAX: u32 = 1 << 14;
 
 pub struct BittorrentClient {
     pub torrents: Vec<Torrent>,
-    pub req_manager: HashMap<String, PeerManager>,
+    pub peer_manager: HashMap<String, PeerManager>,
     //
     // pub peers: HashMap<MsgFrameType, (Peer, Framed<TcpStream, MessageFramer>)>,
 }

@@ -132,25 +132,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
             output,
             torrent: torrent_path,
         } => {
-            let (req_manager_tx, req_manager_rx) = mpsc::channel(64);
+            let (peer_manager_tx, peer_manager_rx) = mpsc::channel(64);
 
-            let req_manager =
-                PeerManager::init(req_manager_rx, output.clone(), torrent_path.clone()).await?;
+            let peer_manager =
+                PeerManager::init(peer_manager_rx, output.clone(), torrent_path.clone()).await?;
 
-            let torrent = &req_manager.torrent;
+            let torrent = &peer_manager.torrent;
 
             let info_hash = torrent.info_hash();
             let tracker = TrackerRequest::new(&info_hash, PEER_ID, PEER_PORT, torrent.get_length());
             let response = tracker.get_response(&torrent.announce).await?;
 
             tokio::spawn(async move {
-                let _ = req_manager.run().await;
+                let _ = peer_manager.run().await;
             });
 
             for &addr in response.peers.0.iter() {
-                let req_manager_tx = req_manager_tx.clone();
+                let peer_manager_tx = peer_manager_tx.clone();
                 tokio::spawn(async move {
-                    let peer = Peer::connect_from_addr(addr, info_hash, *PEER_ID, req_manager_tx)
+                    let peer = Peer::connect_from_addr(addr, info_hash, *PEER_ID, peer_manager_tx)
                         .await
                         .context("initializing peer")
                         .unwrap();
@@ -167,7 +167,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     continue;
                 };
                 let peer =
-                    Peer::connect_from_stream(stream, info_hash, *PEER_ID, req_manager_tx.clone())
+                    Peer::connect_from_stream(stream, info_hash, *PEER_ID, peer_manager_tx.clone())
                         .await
                         .context("initializing incoming peer connection")
                         .unwrap();
