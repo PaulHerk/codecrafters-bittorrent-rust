@@ -5,6 +5,7 @@ use crate::messages::PeerMessage;
 use crate::messages::payloads::NoPayload;
 use crate::messages::payloads::RequestPiecePayload;
 use crate::peer::conn::PeerWriter;
+use crate::peer::conn::send_peer_manager;
 use crate::peer::conn::{BoxedMsgStream, PeerState};
 use crate::peer::error::PeerError;
 use crate::peer_manager::{ReqMessage, ReqMsgFromPeer, ResMessage};
@@ -25,7 +26,7 @@ pub enum Msg {
 pub struct Peer {
     state: PeerState,
     req_queue: Vec<RequestPiecePayload>,
-    req_manager_tx: mpsc::Sender<ReqMsgFromPeer>,
+    peer_manager_tx: mpsc::Sender<ReqMsgFromPeer>,
     peer_writer: PeerWriter,
     // this is an Option because the event-loop takes the Stream and leaves a None in its place while running
     receiver_stream: Option<BoxedMsgStream>,
@@ -37,10 +38,8 @@ impl Peer {
     }
     async fn send_peer_manager(&self, msg: ReqMessage) -> Result<(), PeerError> {
         let peer_id = self.get_id();
-        self.req_manager_tx
-            .send(ReqMsgFromPeer { peer_id, msg })
-            .await
-            .map_err(|error| PeerError::SendToPeerManager { error, peer_id })
+        let msg = ReqMsgFromPeer { peer_id, msg };
+        send_peer_manager(&self.peer_manager_tx, msg, peer_id).await
     }
     async fn send_peer(&mut self, msg: PeerMessage) -> Result<(), PeerError> {
         let msg_type_str = msg

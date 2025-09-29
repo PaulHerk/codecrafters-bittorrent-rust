@@ -1,3 +1,4 @@
+use std::mem;
 use std::net::SocketAddrV4;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -56,6 +57,25 @@ impl PeerState {
         };
         Self(Arc::new(peer_identifier_inner))
     }
+
+    async fn connect_to_peer_manager(
+        &self,
+        peer_manager_tx: &Sender<ReqMsgFromPeer>,
+    ) -> Result<Receiver<ResMessage>, PeerError> {
+        let (sender, peer_manager_rx) = mpsc::channel(16);
+        let peer_conn = PeerConn {
+            sender,
+            identifier: self.clone(),
+        };
+        let peer_id = self.0.peer_id;
+        let msg = ReqMsgFromPeer {
+            peer_id,
+            msg: ReqMessage::NewConnection(peer_conn),
+        };
+        send_peer_manager(peer_manager_tx, msg, peer_id).await?;
+
+        Ok(peer_manager_rx)
+    }
 }
 
 pub(super) type BoxedMsgStream = Pin<Box<dyn Stream<Item = Msg> + Send + Sync>>;
@@ -67,62 +87,52 @@ impl Peer {
         addr: SocketAddrV4,
         info_hash: [u8; 20],
         peer_id: [u8; 20],
-        req_manager_tx: Sender<ReqMsgFromPeer>,
+        peer_manager_tx: Sender<ReqMsgFromPeer>,
     ) -> Result<Self, PeerError> {
         // set up tcp connection & shake hands
         let tcp = tokio::net::TcpStream::connect(addr)
             .await
             .map_err(|error| PeerError::FailedToConnect { error, addr })?;
 
-        Peer::connect_from_stream(tcp, info_hash, peer_id, req_manager_tx).await
+        Peer::connect_from_stream(tcp, info_hash, peer_id, peer_manager_tx).await
     }
 
     pub async fn connect_from_stream(
         mut tcp: TcpStream,
         info_hash: [u8; 20],
         peer_id: [u8; 20],
-        req_manager_tx: Sender<ReqMsgFromPeer>,
+        peer_manager_tx: Sender<ReqMsgFromPeer>,
     ) -> Result<Self, PeerError> {
         let handshake_recv = Handshake::new(info_hash, peer_id)
             .shake_hands(&mut tcp)
             .await?;
         println!("peer {} connected", tcp.peer_addr().unwrap());
 
-        let peer_identifier = PeerState::new(handshake_recv.peer_id);
+        let peer_state = PeerState::new(handshake_recv.peer_id);
 
         // after the handshake as succeeded we can create the message framer that de- & encodes the messages
         // from the tcp stream
         let framed = Framed::new(tcp, MessageFramer);
 
-        // set up req_manager connection
-        let (sender, req_manager_rx) = mpsc::channel(16);
-        let peer_conn = PeerConn {
-            sender,
-            identifier: peer_identifier.clone(),
-        };
-        let peer_id = peer_identifier.0.peer_id;
-        req_manager_tx
-            .send(ReqMsgFromPeer {
-                peer_id,
-                msg: ReqMessage::NewConnection(peer_conn),
-            })
-            .await
-            .map_err(|error| PeerError::SendToPeerManager { error, peer_id })?;
-
+        // set up peer_manager connection
+        let peer_manager_rx = peer_state.connect_to_peer_manager(&peer_manager_tx).await?;
         let (peer_writer, peer_reader) = framed.split();
-        let receiver_stream = Some(get_stream(peer_reader, req_manager_rx).await);
+        let receiver_stream = Some(get_stream(peer_reader, peer_manager_rx).await);
 
         Ok(Self {
-            state: peer_identifier,
+            state: peer_state,
             req_queue: Vec::new(),
-            req_manager_tx,
+            peer_manager_tx,
             peer_writer,
             receiver_stream,
         })
     }
 }
 
-async fn get_stream(framed_rx: PeerReader, req_manager_rx: Receiver<ResMessage>) -> BoxedMsgStream {
+async fn get_stream(
+    framed_rx: PeerReader,
+    peer_manager_rx: Receiver<ResMessage>,
+) -> BoxedMsgStream {
     let peer_msg_stream = unfold(framed_rx, |mut framed| async move {
         match framed.next().timeout(Duration::from_secs(120)).await {
             Ok(Some(Ok(message))) => Some((Msg::Data(message), framed)),
@@ -138,11 +148,27 @@ async fn get_stream(framed_rx: PeerReader, req_manager_rx: Receiver<ResMessage>)
     });
 
     // this is the stream sent by other connections to peers to send have messages
-    let manager_stream = unfold(req_manager_rx, |mut rx| async move {
+    let manager_stream = unfold(peer_manager_rx, |mut rx| async move {
         let msg = rx.recv().await?;
         Some((Msg::ManagerMsg(msg), rx))
     });
 
     let stream = futures_util::stream::select(peer_msg_stream, manager_stream);
     Box::pin(stream)
+}
+
+pub(super) async fn send_peer_manager(
+    peer_manager_tx: &Sender<ReqMsgFromPeer>,
+    msg: ReqMsgFromPeer,
+    peer_id: [u8; 20],
+) -> Result<(), PeerError> {
+    let msg_type = mem::discriminant(&msg.msg);
+    peer_manager_tx
+        .send(msg)
+        .await
+        .map_err(|error| PeerError::SendToPeerManager {
+            error,
+            peer_id,
+            msg_type,
+        })
 }

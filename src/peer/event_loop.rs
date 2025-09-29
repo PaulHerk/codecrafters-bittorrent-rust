@@ -20,7 +20,7 @@ impl Peer {
 
         let mut receiver_stream = mem::take(&mut self.receiver_stream)
             .expect("The receiver stream is initialized after creation of the peer.");
-        // ask req_manager what we have
+        // ask peer_manager what we have
         self.send_peer_manager(ReqMessage::WhatDoWeHave).await?;
         loop {
             if let Some(message) = receiver_stream.next().await {

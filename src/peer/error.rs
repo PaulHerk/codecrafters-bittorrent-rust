@@ -1,9 +1,9 @@
-use std::{io, net::SocketAddrV4};
+use std::{io, mem::Discriminant, net::SocketAddrV4};
 
 use thiserror::Error;
 use tokio::sync::mpsc;
 
-use crate::peer_manager::ReqMsgFromPeer;
+use crate::peer_manager::{ReqMessage, ReqMsgFromPeer};
 
 #[derive(Error, Debug)]
 pub enum PeerError {
@@ -16,11 +16,12 @@ pub enum PeerError {
         msg_type_str: String,
     },
     #[error(
-        "Failed to send a message from the peer with id `{peer_id:?}` to the PeerManager with error: `{error}`"
+        "Failed to send a message with type `{msg_type:?}` from the peer with id `{peer_id:?}` to the PeerManager with error: `{error}`"
     )]
     SendToPeerManager {
         error: mpsc::error::SendError<ReqMsgFromPeer>,
         peer_id: [u8; 20],
+        msg_type: Discriminant<ReqMessage>,
     },
     #[error("The peer unexpectedly disconnected.")]
     PeerDisconnected,
