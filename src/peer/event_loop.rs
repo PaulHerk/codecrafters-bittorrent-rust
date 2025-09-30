@@ -109,7 +109,12 @@ impl Peer {
                             PeerMessage::KeepAlive(_no_payload) => {
                                 eprintln!("he sent a keep alive")
                             }
-                            PeerMessage::Extended(extension_payload) => todo!(),
+                            PeerMessage::Extended(extension_payload) => {
+                                let extensions = self.state.0.extensions.lock().unwrap();
+                                let extension_type =
+                                    extensions.get(&extension_payload.extension_id).cloned();
+                                if let Some(ext_type) = extension_type {}
+                            }
                         }
                     }
                     Msg::Timeout => {

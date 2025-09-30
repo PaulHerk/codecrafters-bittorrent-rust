@@ -45,7 +45,8 @@ pub(crate) struct PeerStateInner {
     pub(crate) peer_interested: Mutex<bool>,
     /// the bitfield of the other peer
     pub(crate) has: Mutex<Vec<bool>>,
-    pub(crate) extensions: Mutex<HashMap<ExtensionType, Vec<u8>>>,
+    /// maps extended message ID to names of extensions
+    pub(crate) extensions: Mutex<HashMap<u8, ExtensionType>>,
 }
 
 impl PeerState {

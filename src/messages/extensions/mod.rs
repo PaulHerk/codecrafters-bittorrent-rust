@@ -9,8 +9,8 @@ pub mod magnet_links;
 /// which we don't have here
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BasicExtensionPayload {
-    extension_id: u8,
-    data: Vec<u8>,
+    pub(crate) extension_id: u8,
+    pub(crate) data: Vec<u8>,
 }
 
 impl Payload for BasicExtensionPayload {
@@ -29,7 +29,8 @@ impl Payload for BasicExtensionPayload {
 }
 
 /// Enum that represents the currently supportet Extensions
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
 pub(crate) enum ExtensionType {
+    Handshake,
     Metadata,
 }
