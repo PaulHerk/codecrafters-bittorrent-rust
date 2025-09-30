@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::mem;
 use std::net::SocketAddrV4;
 use std::pin::Pin;
@@ -17,6 +18,7 @@ use tokio::sync::mpsc::Sender;
 use tokio_util::codec::Framed;
 use tokio_util::time::FutureExt;
 
+use crate::messages::extensions::ExtensionType;
 use crate::messages::{MessageFramer, PeerMessage};
 use crate::peer::Msg;
 use crate::peer::Peer;
@@ -43,6 +45,7 @@ pub(crate) struct PeerStateInner {
     pub(crate) peer_interested: Mutex<bool>,
     /// the bitfield of the other peer
     pub(crate) has: Mutex<Vec<bool>>,
+    pub(crate) extensions: Mutex<HashMap<ExtensionType, Vec<u8>>>,
 }
 
 impl PeerState {
@@ -54,6 +57,7 @@ impl PeerState {
             peer_choking: Mutex::new(true),
             peer_interested: Mutex::new(false),
             has: Mutex::new(Vec::new()),
+            extensions: Mutex::new(HashMap::new()),
         };
         Self(Arc::new(peer_identifier_inner))
     }

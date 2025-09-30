@@ -105,10 +105,11 @@ impl Peer {
                                 .await?;
                                 blocks_left_for_queue -= 1;
                             }
-                            PeerMessage::Cancel(_request_piece_payload) => todo!(), // only for end-game, won't probably use it
+                            PeerMessage::Cancel(_request_piece_payload) => todo!(),
                             PeerMessage::KeepAlive(_no_payload) => {
                                 eprintln!("he sent a keep alive")
                             }
+                            PeerMessage::Extended(extension_payload) => todo!(),
                         }
                     }
                     Msg::Timeout => {

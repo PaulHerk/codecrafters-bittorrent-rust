@@ -5,6 +5,10 @@ use serde_repr::Deserialize_repr;
 use tokio_util::codec::Decoder;
 use tokio_util::codec::Encoder;
 
+use crate::messages::extensions::BasicExtensionPayload;
+
+pub(crate) mod client_identifier;
+pub(crate) mod extensions;
 pub(crate) mod payloads;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -19,8 +23,10 @@ pub enum PeerMessage {
     Piece(ResponsePiecePayload),
     Cancel(RequestPiecePayload),
     KeepAlive(NoPayload),
+    Extended(BasicExtensionPayload),
 }
 
+// TODO: impl Payload for PeerMessage, then put decode logic here
 impl PeerMessage {
     fn to_be_bytes(&self) -> Vec<u8> {
         match self {
@@ -34,6 +40,7 @@ impl PeerMessage {
             PeerMessage::Piece(payload) => payload.to_be_bytes(),
             PeerMessage::Cancel(payload) => payload.to_be_bytes(),
             PeerMessage::KeepAlive(payload) => payload.to_be_bytes(),
+            PeerMessage::Extended(payload) => payload.to_be_bytes(),
         }
     }
     pub(crate) fn get_msg_type(&self) -> Option<MessageType> {
@@ -48,6 +55,7 @@ impl PeerMessage {
             PeerMessage::Piece(_) => Some(MessageType::Piece),
             PeerMessage::Cancel(_) => Some(MessageType::Cancel),
             PeerMessage::KeepAlive(_) => None,
+            PeerMessage::Extended(_) => Some(MessageType::Extended),
         }
     }
 }
@@ -64,6 +72,7 @@ pub enum MessageType {
     Request = 6,
     Piece = 7,
     Cancel = 8,
+    Extended = 20,
 }
 
 pub(crate) struct MessageFramer;
@@ -144,7 +153,10 @@ impl Decoder for MessageFramer {
             Ok(MessageType::Cancel) => Ok(PeerMessage::Cancel(RequestPiecePayload::from_be_bytes(
                 data,
             ))),
-            _ => {
+            Ok(MessageType::Extended) => Ok(PeerMessage::Extended(
+                BasicExtensionPayload::from_be_bytes(data),
+            )),
+            Err(_) => {
                 // now theoretically we would panic here or some sort.
                 // however there are extensions with make use of different message types.
                 // we will ignore them tho
