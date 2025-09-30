@@ -3,6 +3,7 @@ use thiserror::Error;
 
 use crate::messages::extensions::magnet_links::des_info_hash::InfoHash;
 
+const INFO_HASH_PREFIX: &'static str = "urn:btih";
 mod des_info_hash {
     use std::fmt;
 
@@ -12,8 +13,10 @@ mod des_info_hash {
     };
     use sha1::{Digest, Sha1};
 
+    use crate::messages::extensions::magnet_links::INFO_HASH_PREFIX;
+
     #[derive(Debug, PartialEq)]
-    pub(super) struct InfoHash(pub(super) [u8; 20]);
+    pub struct InfoHash(pub [u8; 20]);
     struct InfoHashVisitor;
 
     impl<'de> Visitor<'de> for InfoHashVisitor {
@@ -23,43 +26,30 @@ mod des_info_hash {
             formatter.write_str("'urn:btih': followed by the 40-char hex-encoded info hash")
         }
 
-        /* fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
-        where
-            E: de::Error,
-        {
-            let split = v
-            let hex: Vec<char> = v[..40].iter().map(|b| *b as char).collect();
-            if hex.len() != 40 {
-                return Err(E::invalid_length(hex.len(), 40));
-            } else {
-
-            }
-        } */
         fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
         where
             E: de::Error,
         {
-            let starting_str_exp = "urn:btih:";
-            let starting_str_occ = &v[..starting_str_exp.len()];
-            if starting_str_exp != starting_str_occ {
+            let starting_str_occ = &v[..INFO_HASH_PREFIX.len()];
+            if INFO_HASH_PREFIX != starting_str_occ {
                 return Err(E::custom(format!(
-                    "invalid prefix, got: {starting_str_occ}, expected: {starting_str_exp}"
+                    "invalid prefix, got: {starting_str_occ}, expected: {INFO_HASH_PREFIX}"
                 )));
             } else {
-                let hex_hash = &v[starting_str_exp.len()..];
-                let mut hasher = Sha1::new();
-                hasher.update(hex_hash);
-                let bytes_hash = hasher.finalize().into();
+                let hex_hash = &v[INFO_HASH_PREFIX.len() + 1..]; // +1 for the colon
+                let bytes_hash = hex::decode(hex_hash).map_err(|e| {
+                    E::custom(format!(
+                        "`{hex_hash}` is not a valid hex string. Failed with error: {e}"
+                    ))
+                })?;
+                let bytes_hash: [u8; 20] = bytes_hash.try_into().map_err(|e| {
+                    E::custom(format!(
+                        "Couldn't convert the hex into a valid 20 byte array: `{e:?}`"
+                    ))
+                })?;
                 Ok(InfoHash(bytes_hash))
             }
         }
-
-        // Similar for other methods:
-        //   - visit_i16
-        //   - visit_u8
-        //   - visit_u16
-        //   - visit_u32
-        //   - visit_u64
     }
     impl<'de> Deserialize<'de> for InfoHash {
         fn deserialize<D>(deserializer: D) -> Result<InfoHash, D::Error>
@@ -72,17 +62,17 @@ mod des_info_hash {
 }
 
 #[derive(Deserialize, Debug)]
-struct MagnetLink {
+pub struct MagnetLink {
     #[serde(rename = "xt")]
-    info_hash: InfoHash,
+    pub info_hash: InfoHash,
     #[serde(rename = "dn")]
     file_name: Option<String>,
     #[serde(rename = "tr")]
-    announce: Option<url::Url>,
+    pub announce: Option<url::Url>,
 }
 
 impl MagnetLink {
-    pub(crate) fn from_url(url: &str) -> Result<Self, MagnetLinkError> {
+    pub fn from_url(url: &str) -> Result<Self, MagnetLinkError> {
         let url = url::Url::parse(url)?;
         if url.scheme() != "magnet" {
             return Err(MagnetLinkError::NoMagnetLink);
@@ -116,8 +106,8 @@ mod test_magnetlink {
         assert_eq!(
             magnet_link.info_hash,
             InfoHash([
-                145, 138, 121, 205, 131, 166, 85, 159, 56, 46, 90, 244, 198, 29, 162, 146, 38, 98,
-                61, 39
+                173, 66, 206, 129, 9, 245, 76, 153, 97, 60, 227, 143, 155, 77, 135, 231, 15, 36,
+                161, 101
             ])
         );
         assert_eq!(

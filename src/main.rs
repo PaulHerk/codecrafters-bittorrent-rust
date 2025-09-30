@@ -1,5 +1,6 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
+use codecrafters_bittorrent::magnet_links::MagnetLink;
 use codecrafters_bittorrent::{Peer, PeerManager, Torrent, TrackerRequest};
 use std::error::Error;
 use std::net::{Ipv4Addr, SocketAddrV4};
@@ -41,6 +42,11 @@ enum DecodeMetadataType {
         #[arg(short)]
         output: Option<PathBuf>,
         torrent: PathBuf,
+    },
+    DownloadMagnet {
+        #[arg(short)]
+        output: Option<PathBuf>,
+        magnet_link: String,
     },
 }
 
@@ -134,8 +140,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         } => {
             let (peer_manager_tx, peer_manager_rx) = mpsc::channel(64);
 
-            let peer_manager =
-                PeerManager::init(peer_manager_rx, output.clone(), torrent_path.clone()).await?;
+            let peer_manager = PeerManager::init_from_torrent(
+                peer_manager_rx,
+                output.clone(),
+                torrent_path.clone(),
+            )
+            .await?;
 
             let torrent = &peer_manager.torrent;
 
@@ -173,6 +183,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         .unwrap();
                 peer.run().await.unwrap();
             }
+        }
+        DecodeMetadataType::DownloadMagnet {
+            output,
+            magnet_link,
+        } => {
+            let mag_link = MagnetLink::from_url(&magnet_link)?;
+            // using 999 as a placeholder since we don't know the length yet
+            let tracker = TrackerRequest::new(&mag_link.info_hash.0, PEER_ID, PEER_PORT, 999);
+            let res = tracker
+                .get_response(mag_link.announce.unwrap().as_str())
+                .await?;
+            println!("{:?}", res)
         }
     }
 

@@ -105,7 +105,7 @@ impl BlockState {
 }
 
 impl PeerManager {
-    pub async fn init(
+    pub async fn init_from_torrent(
         rx: mpsc::Receiver<ReqMsgFromPeer>,
         file_path: Option<PathBuf>,
         torrent_path: PathBuf,

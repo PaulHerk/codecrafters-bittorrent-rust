@@ -7,20 +7,20 @@ use crate::tracker::peers::PeerConnections;
 #[derive(Debug, Clone, Serialize)]
 pub struct TrackerRequest<'a> {
     /// the info hash of the torrent
-    pub info_hash: &'a [u8; 20],
+    info_hash: &'a [u8; 20],
     /// a unique identifier for your client
-    pub peer_id: &'a [u8; 20],
+    peer_id: &'a [u8; 20],
     /// the port your client is listening on
-    pub port: u16,
+    port: u16,
     /// the total amount uploaded so far
-    pub uploaded: u32,
+    uploaded: u32,
     /// the total amount downloaded so far
-    pub downloaded: u32,
+    downloaded: u32,
     /// the number of bytes left to download
-    pub left: u32,
+    left: u32,
     /// whether the peer list should use the compact representation
     /// The compact representation is more commonly used in the wild, the non-compact representation is mostly supported for backward-compatibility.
-    pub compact: u8,
+    compact: u8,
 }
 
 impl<'a> TrackerRequest<'a> {
