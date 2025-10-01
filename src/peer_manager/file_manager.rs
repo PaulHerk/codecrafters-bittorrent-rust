@@ -7,6 +7,7 @@ use crate::{
     BLOCK_MAX, Torrent,
     messages::payloads::{RequestPiecePayload, ResponsePiecePayload},
     peer_manager::{BlockState, error::PeerManagerError},
+    torrent::Info,
 };
 
 impl PeerManager {
@@ -50,7 +51,7 @@ impl PeerManager {
     // it checks the hash, updates the bitfield and writes the piece to the file
     // if this fails somewhere, it should be fine since the piece will get picked up later again
     async fn handle_piece(&mut self, piece_state: &PieceState) -> Result<(), PeerManagerError> {
-        piece_state.check_hash(&self.torrent);
+        piece_state.check_hash(&self.torrent_info);
         self.write_piece_to_file(piece_state).await?;
 
         // we first calculate the new bitfield, then update it in the DB and lastly update the struct
@@ -59,7 +60,7 @@ impl PeerManager {
         let piece_i = piece_state.piece_i as usize;
         new_bitfield[piece_i] = true;
         self.db_conn
-            .update_bitfields(&self.info_hash, new_bitfield)
+            .update_bitfields(&self.info_hash_hex, new_bitfield)
             .await?;
         self.have[piece_i] = true;
 
@@ -70,7 +71,7 @@ impl PeerManager {
         &mut self,
         piece_state: &PieceState,
     ) -> Result<(), PeerManagerError> {
-        let offset = piece_state.piece_i as u64 * self.torrent.info.piece_length as u64;
+        let offset = piece_state.piece_i as u64 * self.torrent_info.piece_length as u64;
 
         let buf = &piece_state.buf[..];
         self.file.write_all_at(buf, offset)?;
@@ -84,7 +85,7 @@ impl PeerManager {
         req_payload: RequestPiecePayload,
     ) -> Option<ResponsePiecePayload> {
         let mut buf = vec![0_u8; req_payload.length as usize];
-        let offset = req_payload.index as u64 * self.torrent.info.piece_length as u64
+        let offset = req_payload.index as u64 * self.torrent_info.piece_length as u64
             + req_payload.begin as u64;
         if self.file.read_exact_at(&mut buf, offset).is_err() {
             return None;
@@ -147,11 +148,11 @@ impl PieceState {
         self.blocks[block_i] = BlockState::Finished;
     }
 
-    fn check_hash(&self, torrent: &Torrent) -> bool {
+    fn check_hash(&self, torrent_info: &Info) -> bool {
         let mut sha1 = Sha1::new();
         sha1.update(&self.buf);
         let hash: [u8; 20] = sha1.finalize().into();
-        let torrent_hash = torrent.info.pieces.0[self.piece_i as usize];
+        let torrent_hash = torrent_info.pieces.0[self.piece_i as usize];
         hash == torrent_hash
     }
 }

@@ -28,6 +28,7 @@ use crate::peer_manager::PeerConn;
 use crate::peer_manager::ReqMessage;
 use crate::peer_manager::ReqMsgFromPeer;
 use crate::peer_manager::ResMessage;
+use crate::torrent::InfoHash;
 
 /// this is just a wrapper type for the actual states that wraps it in an Arc
 #[derive(Debug, Clone)]
@@ -90,7 +91,7 @@ type PeerReader = SplitStream<Framed<TcpStream, MessageFramer>>;
 impl Peer {
     pub async fn connect_from_addr(
         addr: SocketAddrV4,
-        info_hash: [u8; 20],
+        info_hash: InfoHash,
         peer_id: [u8; 20],
         peer_manager_tx: Sender<ReqMsgFromPeer>,
     ) -> Result<Self, PeerError> {
@@ -104,7 +105,7 @@ impl Peer {
 
     pub async fn connect_from_stream(
         mut tcp: TcpStream,
-        info_hash: [u8; 20],
+        info_hash: InfoHash,
         peer_id: [u8; 20],
         peer_manager_tx: Sender<ReqMsgFromPeer>,
     ) -> Result<Self, PeerError> {

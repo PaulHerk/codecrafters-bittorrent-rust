@@ -67,8 +67,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let torrent = Torrent::read_from_file(torrent)?;
             // println!("Tracker URL: {}", torrent.announce);
             // println!("Length: {}", torrent.get_length());
-            let info_hash = torrent.info_hash();
-            println!("Info Hash: {}", hex::encode(info_hash));
+            let info_hash = torrent.info.info_hash();
+            println!("Info Hash: {}", hex::encode(info_hash.0));
             println!("Piece Length: {}", torrent.info.piece_length);
             // print everything except the piece hashes
             println!("{:#?}", torrent.info.files);
@@ -77,10 +77,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
         DecodeMetadataType::Peers { torrent } => {
             let torrent = Torrent::read_from_file(torrent)?;
-            let info_hash = torrent.info_hash();
+            let info_hash = torrent.info.info_hash();
             let tracker_req =
-                TrackerRequest::new(&info_hash, PEER_ID, PEER_PORT, torrent.get_length());
-            let response = tracker_req.get_response(&torrent.announce).await?;
+                TrackerRequest::new(&info_hash, PEER_ID, PEER_PORT, torrent.info.get_length());
+            let response = tracker_req.get_response(torrent.announce).await?;
             for peer in response.peers.0 {
                 println!("{peer:?}");
             }
@@ -88,7 +88,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         DecodeMetadataType::Handshake { torrent, addr } => {
             let torrent = Torrent::read_from_file(torrent)?;
             let (tx, _rx) = mpsc::channel(1);
-            let peer = Peer::connect_from_addr(*addr, torrent.info_hash(), *PEER_ID, tx).await?;
+            let peer =
+                Peer::connect_from_addr(*addr, torrent.info.info_hash(), *PEER_ID, tx).await?;
             println!("Peer with id {:?} connected", peer.get_id());
         }
         DecodeMetadataType::DownloadPiece {
@@ -140,18 +141,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
         } => {
             let (peer_manager_tx, peer_manager_rx) = mpsc::channel(64);
 
-            let peer_manager = PeerManager::init_from_torrent(
-                peer_manager_rx,
-                output.clone(),
-                torrent_path.clone(),
-            )
-            .await?;
+            let torrent = Torrent::read_from_file(torrent_path)?;
+            let peer_manager =
+                PeerManager::init_from_torrent(peer_manager_rx, output.clone(), torrent.clone())
+                    .await?;
 
-            let torrent = &peer_manager.torrent;
-
-            let info_hash = torrent.info_hash();
-            let tracker = TrackerRequest::new(&info_hash, PEER_ID, PEER_PORT, torrent.get_length());
-            let response = tracker.get_response(&torrent.announce).await?;
+            let info_hash = torrent.info.info_hash();
+            let tracker =
+                TrackerRequest::new(&info_hash, PEER_ID, PEER_PORT, torrent.info.get_length());
+            let response = tracker.get_response(torrent.announce).await?;
 
             tokio::spawn(async move {
                 let _ = peer_manager.run().await;
@@ -188,12 +186,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
             output,
             magnet_link,
         } => {
-            let mag_link = MagnetLink::from_url(&magnet_link)?;
+            let mag_link = MagnetLink::from_url(magnet_link)?;
             // using 999 as a placeholder since we don't know the length yet
-            let tracker = TrackerRequest::new(&mag_link.info_hash.0, PEER_ID, PEER_PORT, 999);
-            let res = tracker
-                .get_response(mag_link.announce.unwrap().as_str())
-                .await?;
+            let tracker = TrackerRequest::new(&mag_link.info_hash, PEER_ID, PEER_PORT, 999);
+            let res = tracker.get_response(mag_link.announce.unwrap()).await?;
             println!("{:?}", res)
         }
     }

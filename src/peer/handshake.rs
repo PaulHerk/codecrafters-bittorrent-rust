@@ -1,6 +1,6 @@
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::peer::error::PeerError;
+use crate::{peer::error::PeerError, torrent::InfoHash};
 
 #[derive(Debug, Copy, Clone, bincode::Encode, bincode::Decode)]
 pub struct Handshake {
@@ -13,12 +13,12 @@ pub struct Handshake {
 const HANDSHAKE_LEN: usize = std::mem::size_of::<Handshake>();
 
 impl Handshake {
-    pub fn new(info_hash: [u8; 20], peer_id: [u8; 20]) -> Self {
+    pub fn new(info_hash: InfoHash, peer_id: [u8; 20]) -> Self {
         Self {
             length: 19,
             protocol: *b"BitTorrent protocol",
             reserved: *b"00000000",
-            info_hash,
+            info_hash: info_hash.0,
             peer_id,
         }
     }

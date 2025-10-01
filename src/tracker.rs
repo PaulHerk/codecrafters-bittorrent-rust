@@ -2,12 +2,12 @@ use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::tracker::peers::PeerConnections;
+use crate::{torrent::InfoHash, tracker::peers::PeerConnections};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TrackerRequest<'a> {
     /// the info hash of the torrent
-    info_hash: &'a [u8; 20],
+    info_hash: &'a InfoHash,
     /// a unique identifier for your client
     peer_id: &'a [u8; 20],
     /// the port your client is listening on
@@ -25,7 +25,7 @@ pub struct TrackerRequest<'a> {
 
 impl<'a> TrackerRequest<'a> {
     pub fn new(
-        info_hash: &'a [u8; 20],
+        info_hash: &'a InfoHash,
         peer_id: &'a [u8; 20],
         port: u16,
         file_length: u32,
@@ -42,7 +42,10 @@ impl<'a> TrackerRequest<'a> {
     }
     fn to_url_encoded(&self) -> String {
         let mut url_encoded = String::new();
-        url_encoded.push_str(&format!("info_hash={}", escape_bytes_url(self.info_hash)));
+        url_encoded.push_str(&format!(
+            "info_hash={}",
+            escape_bytes_url(&self.info_hash.0)
+        ));
         url_encoded.push_str(&format!("&peer_id={}", escape_bytes_url(self.peer_id)));
         url_encoded.push_str(&format!("&port={}", self.port));
         url_encoded.push_str(&format!("&uploaded={}", self.uploaded));
@@ -54,17 +57,16 @@ impl<'a> TrackerRequest<'a> {
 
     pub async fn get_response(
         &self,
-        announce_url: &str,
+        mut announce_url: url::Url,
     ) -> Result<TrackerResponse, TrackerRequestError> {
-        let mut url = Url::parse(announce_url)?;
-        url.set_query(Some(&self.to_url_encoded()));
+        announce_url.set_query(Some(&self.to_url_encoded()));
 
         let client = reqwest::Client::builder()
         .user_agent(
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:142.0) Gecko/20100101 Firefox/142.0",
         )
         .build()?;
-        let response = client.get(url).send().await?;
+        let response = client.get(announce_url).send().await?;
         let response_bytes = response.bytes().await?;
 
         serde_bencode::from_bytes::<TrackerResponse>(&response_bytes).map_err(|des_err| {

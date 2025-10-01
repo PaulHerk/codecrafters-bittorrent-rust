@@ -12,6 +12,7 @@ use crate::{
     messages::payloads::{BitfieldPayload, RequestPiecePayload, ResponsePiecePayload},
     peer::conn::PeerState,
     peer_manager::error::PeerManagerError,
+    torrent::Info,
 };
 
 mod error;
@@ -69,9 +70,10 @@ pub struct PeerManager {
     have: Vec<bool>,
     /// if it's None, we are finished
     download_queue: Option<Vec<PieceState>>,
-    pub torrent: Torrent,
+    torrent_info: Info,
+    pub announce_url: url::Url,
     /// this is also cached, it'll never change
-    info_hash: String,
+    pub info_hash_hex: String,
     peers: HashMap<[u8; 20], PeerConn>,
 }
 
@@ -108,12 +110,13 @@ impl PeerManager {
     pub async fn init_from_torrent(
         rx: mpsc::Receiver<ReqMsgFromPeer>,
         file_path: Option<PathBuf>,
-        torrent_path: PathBuf,
+        torrent: Torrent,
     ) -> Result<Self, PeerManagerError> {
         let db_conn = DBConnection::new().await?;
-        let torrent = Torrent::read_from_file(&torrent_path)?;
+        let file_path = file_path.unwrap_or(torrent.info.name.clone().into());
+        let info_hash = torrent.info.info_hash();
         let file_info = db_conn
-            .set_and_get_file(file_path, torrent_path, &torrent)
+            .set_and_get_file(file_path, &info_hash, Some(torrent.info), torrent.announce)
             .await?;
 
         let file = OpenOptions::new()
@@ -131,7 +134,7 @@ impl PeerManager {
         } else {
             Some(Vec::with_capacity(MAX_PIECES_IN_PARALLEL))
         };
-        let info_hash = hex::encode(torrent.info_hash());
+        let info_hash_hex = hex::encode(info_hash.0);
 
         Ok(Self {
             file,
@@ -139,8 +142,11 @@ impl PeerManager {
             rx,
             have: file_info.bitfield.to_vec(),
             download_queue: download_state,
-            torrent,
-            info_hash,
+            torrent_info: file_info
+                .torrent_info
+                .expect("Since we init from a torrent file, we have the torrent_info"),
+            announce_url: file_info.announce,
+            info_hash_hex,
             peers: HashMap::new(),
         })
     }

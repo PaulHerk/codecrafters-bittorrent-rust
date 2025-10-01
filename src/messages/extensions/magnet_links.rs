@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::messages::extensions::magnet_links::des_info_hash::InfoHash;
+use crate::torrent::InfoHash;
 
 const INFO_HASH_PREFIX: &'static str = "urn:btih";
 mod des_info_hash {
@@ -11,12 +11,9 @@ mod des_info_hash {
         Deserialize, Deserializer,
         de::{self, Visitor},
     };
-    use sha1::{Digest, Sha1};
 
-    use crate::messages::extensions::magnet_links::INFO_HASH_PREFIX;
+    use crate::{messages::extensions::magnet_links::INFO_HASH_PREFIX, torrent::InfoHash};
 
-    #[derive(Debug, PartialEq)]
-    pub struct InfoHash(pub [u8; 20]);
     struct InfoHashVisitor;
 
     impl<'de> Visitor<'de> for InfoHashVisitor {

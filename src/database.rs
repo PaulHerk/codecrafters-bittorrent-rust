@@ -13,23 +13,31 @@ use surrealdb::engine::local::RocksDb;
 use thiserror::Error;
 
 use crate::Torrent;
+use crate::torrent::Info;
+use crate::torrent::InfoHash;
 
 /// the actual data stored in the DB
 /// torrent path is also the key
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub(crate) struct FileInfo {
+pub(crate) struct DBEntry {
     pub(crate) bitfield: Cow<'static, [bool]>,
     pub(crate) file: Cow<'static, Path>,
     // TODO: don't store path, rather the content
-    pub(crate) torrent: Cow<'static, Path>,
+    pub(crate) torrent_info: Option<Info>,
+    pub(crate) announce: url::Url,
 }
 
-impl FileInfo {
-    fn from_new_file(file_path: PathBuf, torrent_path: PathBuf, n_pieces: usize) -> Self {
+impl DBEntry {
+    fn from_new_file(file_path: PathBuf, torrent_info: Option<Info>, announce: url::Url) -> Self {
+        let n_pieces = torrent_info
+            .as_ref()
+            .map(|i| i.pieces.0.len())
+            .unwrap_or(999);
         Self {
             bitfield: (vec![false; n_pieces]).into(),
             file: file_path.into(),
-            torrent: torrent_path.into(),
+            torrent_info,
+            announce,
         }
     }
 
@@ -55,24 +63,19 @@ impl DBConnection {
 
     pub(crate) async fn set_and_get_file(
         &self,
-        file_path: Option<PathBuf>,
-        torrent_path: PathBuf,
-        torrent: &Torrent,
-    ) -> Result<FileInfo, DBError> {
-        // read the torrent file
-        let info_hash_hex = &hex::encode(torrent.info_hash());
-        // get the file path, create a new entry and insert it
-        let file_path = match file_path {
-            Some(path) => path,
-            None => PathBuf::from(&torrent.info.name),
-        };
-        let file = FileInfo::from_new_file(file_path, torrent_path, torrent.info.pieces.0.len());
+        file_path: PathBuf,
+        info_hash: &InfoHash,
+        torrent_info: Option<Info>,
+        announce: url::Url,
+    ) -> Result<DBEntry, DBError> {
+        let info_hash_hex = &hex::encode(info_hash.0);
+        let file = DBEntry::from_new_file(file_path, torrent_info, announce);
 
         // so I have to create the content already since it would complain that the content is invalid
         // TODO: do with select
         let file_info = match self
             .0
-            .create::<Option<FileInfo>>(("files", info_hash_hex))
+            .create::<Option<DBEntry>>(("files", info_hash_hex))
             .content(file)
             .await
         {
@@ -83,7 +86,7 @@ impl DBConnection {
                 if let surrealdb::Error::Db(ref e) = e
                     && let surrealdb::error::Db::RecordExists { thing } = e
                 {
-                    let record: Option<FileInfo> = self
+                    let record: Option<DBEntry> = self
                         .0
                         .select((thing.tb.as_str(), thing.id.to_raw()))
                         .await?;
@@ -99,12 +102,12 @@ impl DBConnection {
 
     pub(super) async fn update_bitfields(
         &mut self,
-        info_hash: &str,
+        info_hash_hex: &str,
         new_bitfield: Vec<bool>,
     ) -> Result<(), DBError> {
-        let updated: Option<FileInfo> = self
+        let updated: Option<DBEntry> = self
             .0
-            .update(("files", info_hash))
+            .update(("files", info_hash_hex))
             .patch(PatchOp::replace("/bitfield", new_bitfield))
             .await?;
         dbg!(&updated);

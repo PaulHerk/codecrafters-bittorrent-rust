@@ -5,6 +5,24 @@ use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use thiserror::Error;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct InfoHash(pub [u8; 20]);
+
+mod ser_info_hash {
+    use serde::{Serialize, Serializer};
+
+    use crate::torrent::InfoHash;
+
+    impl Serialize for InfoHash {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            serializer.serialize_bytes(&self.0)
+        }
+    }
+}
+
 mod hashes {
     use serde::de::{self, Visitor};
     use serde::ser::{Serialize, Serializer};
@@ -37,16 +55,17 @@ mod hashes {
             E: de::Error,
         {
             if v.len() % 20 != 0 {
-                return Err(de::Error::custom(format!(
+                Err(de::Error::custom(format!(
                     "Bytes which length is a multiple of 20. Got {:?}",
                     v.len()
-                )));
+                )))
+            } else {
+                Ok(Hashes(
+                    v.chunks_exact(20)
+                        .map(|slice_20| slice_20.try_into().expect("slice_20 is 20 bytes"))
+                        .collect(),
+                ))
             }
-            Ok(Hashes(
-                v.chunks_exact(20)
-                    .map(|slice_20| slice_20.try_into().expect("slice_20 is 20 bytes"))
-                    .collect(),
-            ))
         }
     }
 
@@ -64,7 +83,7 @@ mod hashes {
 /// The Metainfo files
 pub struct Torrent {
     /// The url of the tracker.
-    pub announce: String,
+    pub announce: url::Url,
     /// This maps to a dictionary.
     pub info: Info,
 }
@@ -78,23 +97,6 @@ impl Torrent {
         let torrent = serde_bencode::from_bytes::<Torrent>(&bytes)?;
 
         Ok(torrent)
-    }
-    pub fn info_hash(&self) -> [u8; 20] {
-        let mut hasher = Sha1::new();
-        let bytes = serde_bencode::to_bytes(&self.info)
-            .expect("If this doesn't work, the &self provided would be invalid");
-        hasher.update(&bytes);
-        let info_hash = hasher.finalize();
-        info_hash.into()
-    }
-
-    pub fn get_length(&self) -> u32 {
-        if let Some(length) = self.info.length {
-            length
-        } else {
-            dbg!(&self);
-            todo!()
-        }
     }
 }
 
@@ -117,6 +119,26 @@ pub struct Info {
     pub files: Key,
     #[serde(flatten)]
     pub other: HashMap<String, serde_bencode::value::Value>,
+}
+
+impl Info {
+    pub fn info_hash(&self) -> InfoHash {
+        let mut hasher = Sha1::new();
+        let bytes = serde_bencode::to_bytes(&self)
+            .expect("If this doesn't work, the &self provided would be invalid");
+        hasher.update(&bytes);
+        let info_hash = hasher.finalize();
+        InfoHash(info_hash.into())
+    }
+
+    pub fn get_length(&self) -> u32 {
+        if let Some(length) = self.length {
+            length
+        } else {
+            dbg!(&self);
+            todo!()
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

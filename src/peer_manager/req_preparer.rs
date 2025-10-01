@@ -4,6 +4,7 @@ use crate::{
     BLOCK_MAX, Torrent,
     messages::payloads::RequestPiecePayload,
     peer_manager::{BlockState, MAX_PIECES_IN_PARALLEL, PieceState},
+    torrent::Info,
 };
 
 use super::PeerManager;
@@ -102,7 +103,7 @@ impl PeerManager {
             return false;
         };
 
-        let piece_state = PieceState::new(&self.torrent, *piece_i);
+        let piece_state = PieceState::new(&self.torrent_info, *piece_i);
         queue.push(piece_state);
 
         true
@@ -111,8 +112,8 @@ impl PeerManager {
 
 impl PieceState {
     /// calculates n_blocks and piece_size and creates a new PieceState
-    pub(super) fn new(torrent: &Torrent, piece_i: u32) -> Self {
-        let piece_size = get_piece_size(torrent, piece_i);
+    pub(super) fn new(torrent_info: &Info, piece_i: u32) -> Self {
+        let piece_size = get_piece_size(torrent_info, piece_i);
         let n_blocks = piece_size.div_ceil(BLOCK_MAX);
 
         PieceState {
@@ -123,10 +124,10 @@ impl PieceState {
     }
 }
 
-fn get_piece_size(torrent: &Torrent, piece_i: u32) -> u32 {
-    let length = torrent.get_length();
-    let piece_length = torrent.info.piece_length;
-    if piece_i == torrent.info.pieces.0.len() as u32 - 1 && length % piece_length != 0 {
+fn get_piece_size(torrent_info: &Info, piece_i: u32) -> u32 {
+    let length = torrent_info.get_length();
+    let piece_length = torrent_info.piece_length;
+    if piece_i == torrent_info.pieces.0.len() as u32 - 1 && length % piece_length != 0 {
         length % piece_length
     } else {
         piece_length
