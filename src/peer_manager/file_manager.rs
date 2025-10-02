@@ -4,7 +4,7 @@ use sha1::{Digest, Sha1};
 
 use super::{PeerManager, PieceState};
 use crate::{
-    BLOCK_MAX, Torrent,
+    BLOCK_MAX,
     messages::payloads::{RequestPiecePayload, ResponsePiecePayload},
     peer_manager::{BlockState, error::PeerManagerError},
     torrent::Info,

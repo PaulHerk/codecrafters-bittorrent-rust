@@ -1,7 +1,15 @@
+use std::{error::Error, net::SocketAddrV4, os::unix::net::SocketAddr};
+
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::torrent::InfoHash;
+use crate::{
+    database::DBError, peer_manager::error::PeerManagerError, torrent::InfoHash,
+    tracker::TrackerRequestError,
+};
+
+mod before_download_manager;
+mod peer_manager_init;
 
 const INFO_HASH_PREFIX: &'static str = "urn:btih";
 mod des_info_hash {
@@ -12,7 +20,7 @@ mod des_info_hash {
         de::{self, Visitor},
     };
 
-    use crate::{messages::extensions::magnet_links::INFO_HASH_PREFIX, torrent::InfoHash};
+    use crate::{extensions::magnet_links::INFO_HASH_PREFIX, torrent::InfoHash};
 
     struct InfoHashVisitor;
 
@@ -66,6 +74,8 @@ pub struct MagnetLink {
     file_name: Option<String>,
     #[serde(rename = "tr")]
     pub announce: Option<url::Url>,
+    #[serde(rename = "x.pe")]
+    peer_addr: Option<SocketAddrV4>,
 }
 
 impl MagnetLink {
@@ -90,6 +100,15 @@ pub enum MagnetLinkError {
     NoQueryFound,
     #[error("Failed to deserialize the query in the link with the error: `{0}`")]
     FailedToDesQuery(#[from] serde_urlencoded::de::Error),
+    #[error("downloading from a magnetlink without a provided tracker url isn't supported")]
+    NoTrackerUrl,
+
+    #[error("Failed in the Peer Manager with the error: `{0}`")]
+    PeerManagerError(#[from] PeerManagerError),
+    #[error("Error happened in the database when initializing.")]
+    DBError(#[from] DBError),
+    #[error(transparent)]
+    TrackerError(#[from] TrackerRequestError),
 }
 
 #[cfg(test)]

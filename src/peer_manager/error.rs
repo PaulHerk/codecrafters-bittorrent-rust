@@ -29,4 +29,6 @@ pub enum PeerManagerError {
     PeerNotFound,
     #[error("An error occured when writing to the file: `{0}`")]
     WritingToFile(#[from] io::Error),
+    #[error("No file name provided")]
+    NoFileName,
 }

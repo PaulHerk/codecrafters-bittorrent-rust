@@ -1,7 +1,7 @@
 use bytes::BufMut;
 use serde::{Deserialize, Serialize};
 
-use crate::messages::{client_identifier::ClientIdentifier, payloads::Payload};
+use crate::messages::payloads::Payload;
 pub mod magnet_links;
 
 /// This Payload is merely a holder for the extended message ID and data.

@@ -15,13 +15,13 @@ use crate::{
     torrent::Info,
 };
 
-mod error;
+pub mod error;
 mod file_manager;
 mod req_preparer;
 
 pub const BLOCK_QUEUE_SIZE_MAX: usize = 20;
 /// how many pieces are in the queue at max
-const MAX_PIECES_IN_PARALLEL: usize = 5;
+pub(crate) const MAX_PIECES_IN_PARALLEL: usize = 5;
 
 /// A message sent by a local peer to this Manager
 #[derive(Debug, Clone)]
@@ -62,19 +62,19 @@ pub enum ResMessage {
 
 pub struct PeerManager {
     /// the output file
-    file: File,
-    db_conn: DBConnection,
-    rx: mpsc::Receiver<ReqMsgFromPeer>,
+    pub(crate) file: File,
+    pub(crate) db_conn: DBConnection,
+    pub(crate) rx: mpsc::Receiver<ReqMsgFromPeer>,
     /// I need this information too often to always query the DB
     /// so let's cache it
-    have: Vec<bool>,
+    pub(crate) have: Vec<bool>,
     /// if it's None, we are finished
-    download_queue: Option<Vec<PieceState>>,
-    torrent_info: Info,
+    pub(crate) download_queue: Option<Vec<PieceState>>,
+    pub(crate) torrent_info: Info,
     pub announce_url: url::Url,
     /// this is also cached, it'll never change
     pub info_hash_hex: String,
-    peers: HashMap<[u8; 20], PeerConn>,
+    pub(crate) peers: HashMap<[u8; 20], PeerConn>,
 }
 
 #[derive(Debug, Clone)]
@@ -84,7 +84,7 @@ pub struct PeerConn {
 }
 
 #[derive(Clone, Debug)]
-struct PieceState {
+pub(crate) struct PieceState {
     blocks: Vec<BlockState>,
     piece_i: u32,
     buf: Vec<u8>,
@@ -116,7 +116,7 @@ impl PeerManager {
         let file_path = file_path.unwrap_or(torrent.info.name.clone().into());
         let info_hash = torrent.info.info_hash();
         let file_info = db_conn
-            .set_and_get_file(file_path, &info_hash, Some(torrent.info), torrent.announce)
+            .set_and_get_file(file_path, &info_hash, torrent.info, torrent.announce)
             .await?;
 
         let file = OpenOptions::new()
@@ -142,9 +142,7 @@ impl PeerManager {
             rx,
             have: file_info.bitfield.to_vec(),
             download_queue: download_state,
-            torrent_info: file_info
-                .torrent_info
-                .expect("Since we init from a torrent file, we have the torrent_info"),
+            torrent_info: file_info.torrent_info,
             announce_url: file_info.announce,
             info_hash_hex,
             peers: HashMap::new(),

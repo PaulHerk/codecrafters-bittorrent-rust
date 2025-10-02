@@ -18,7 +18,7 @@ use tokio::sync::mpsc::Sender;
 use tokio_util::codec::Framed;
 use tokio_util::time::FutureExt;
 
-use crate::messages::extensions::ExtensionType;
+use crate::extensions::ExtensionType;
 use crate::messages::{MessageFramer, PeerMessage};
 use crate::peer::Msg;
 use crate::peer::Peer;

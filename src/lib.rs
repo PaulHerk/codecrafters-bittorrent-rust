@@ -1,11 +1,12 @@
 mod database;
+mod extensions;
 mod messages;
 mod peer;
 mod peer_manager;
 mod torrent;
 mod tracker;
 
-pub use messages::extensions::magnet_links;
+pub use extensions::magnet_links;
 pub use peer::Peer;
 pub use peer_manager::PeerManager;
 use std::collections::HashMap;

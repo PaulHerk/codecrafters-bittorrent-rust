@@ -23,16 +23,13 @@ pub(crate) struct DBEntry {
     pub(crate) bitfield: Cow<'static, [bool]>,
     pub(crate) file: Cow<'static, Path>,
     // TODO: don't store path, rather the content
-    pub(crate) torrent_info: Option<Info>,
+    pub(crate) torrent_info: Info,
     pub(crate) announce: url::Url,
 }
 
 impl DBEntry {
-    fn from_new_file(file_path: PathBuf, torrent_info: Option<Info>, announce: url::Url) -> Self {
-        let n_pieces = torrent_info
-            .as_ref()
-            .map(|i| i.pieces.0.len())
-            .unwrap_or(999);
+    fn from_new_file(file_path: PathBuf, torrent_info: Info, announce: url::Url) -> Self {
+        let n_pieces = torrent_info.pieces.0.len();
         Self {
             bitfield: (vec![false; n_pieces]).into(),
             file: file_path.into(),
@@ -65,39 +62,28 @@ impl DBConnection {
         &self,
         file_path: PathBuf,
         info_hash: &InfoHash,
-        torrent_info: Option<Info>,
+        torrent_info: Info,
         announce: url::Url,
     ) -> Result<DBEntry, DBError> {
         let info_hash_hex = &hex::encode(info_hash.0);
-        let file = DBEntry::from_new_file(file_path, torrent_info, announce);
 
-        // so I have to create the content already since it would complain that the content is invalid
-        // TODO: do with select
-        let file_info = match self
-            .0
-            .create::<Option<DBEntry>>(("files", info_hash_hex))
-            .content(file)
-            .await
-        {
-            Ok(created) => {
-                return Ok(created.expect("Not even sure when this is None in the first place.."));
-            }
-            Err(e) => {
-                if let surrealdb::Error::Db(ref e) = e
-                    && let surrealdb::error::Db::RecordExists { thing } = e
-                {
-                    let record: Option<DBEntry> = self
-                        .0
-                        .select((thing.tb.as_str(), thing.id.to_raw()))
-                        .await?;
-                    Ok(record.expect("It must exist since we just checked that it exists"))
-                } else {
-                    Err(e)
-                }
-            }
-        }?;
+        if let Some(entry) = self.get_entry(info_hash_hex).await? {
+            Ok(entry)
+        } else {
+            let file = DBEntry::from_new_file(file_path, torrent_info, announce);
+            let entry = self
+                .0
+                .create::<Option<DBEntry>>(("files", info_hash_hex))
+                .content(file)
+                .await?
+                .expect("I'm really curious what the error is here.");
+            Ok(entry)
+        }
+    }
 
-        Ok(file_info)
+    pub(crate) async fn get_entry(&self, info_hash_hex: &str) -> Result<Option<DBEntry>, DBError> {
+        let entry = self.0.select(("files", info_hash_hex)).await?;
+        Ok(entry)
     }
 
     pub(super) async fn update_bitfields(

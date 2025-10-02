@@ -5,10 +5,9 @@ use serde_repr::Deserialize_repr;
 use tokio_util::codec::Decoder;
 use tokio_util::codec::Encoder;
 
-use crate::messages::extensions::BasicExtensionPayload;
+use crate::extensions::BasicExtensionPayload;
 
 pub(crate) mod client_identifier;
-pub(crate) mod extensions;
 pub(crate) mod payloads;
 
 #[derive(Debug, Clone, PartialEq)]

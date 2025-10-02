@@ -186,11 +186,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
             output,
             magnet_link,
         } => {
-            let mag_link = MagnetLink::from_url(magnet_link)?;
-            // using 999 as a placeholder since we don't know the length yet
-            let tracker = TrackerRequest::new(&mag_link.info_hash, PEER_ID, PEER_PORT, 999);
-            let res = tracker.get_response(mag_link.announce.unwrap()).await?;
-            println!("{:?}", res)
+            let (peer_manager_tx, rx) = mpsc::channel(64);
+            let peer_manager =
+                PeerManager::init_from_magnet(rx, output.clone(), magnet_link, PEER_ID, PEER_PORT)
+                    .await?;
         }
     }
 
