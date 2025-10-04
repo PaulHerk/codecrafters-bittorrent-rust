@@ -2,6 +2,7 @@ use bytes::BufMut;
 use serde::{Deserialize, Serialize};
 
 use crate::messages::payloads::Payload;
+pub(crate) mod handshake;
 // pub mod magnet_links;
 
 /// This Payload is merely a holder for the extended message ID and data.
@@ -34,3 +35,6 @@ pub(crate) enum ExtensionType {
     Handshake,
     Metadata,
 }
+
+// the handshake is always active
+pub const ACTIVE_EXTENSIONS: &[ExtensionType] = &[ExtensionType::Metadata];

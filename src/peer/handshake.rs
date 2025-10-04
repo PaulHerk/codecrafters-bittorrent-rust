@@ -14,10 +14,16 @@ const HANDSHAKE_LEN: usize = std::mem::size_of::<Handshake>();
 
 impl Handshake {
     pub fn new(info_hash: InfoHash, peer_id: [u8; 20]) -> Self {
+        let mut reserved = [0_u8; 8];
+
+        // The bit selected for the extension protocol is bit 20 from the right
+        // .... 00010000 00000000 00000000
+        //         ^ 20th bit from the right, counting starts at 0
+        reserved[5] = 0x10;
         Self {
             length: 19,
             protocol: *b"BitTorrent protocol",
-            reserved: *b"00000000",
+            reserved,
             info_hash: info_hash.0,
             peer_id,
         }
@@ -56,7 +62,11 @@ impl Handshake {
         assert_eq!(handshake_recv.length, 19);
         assert_eq!(handshake_recv.protocol, *b"BitTorrent protocol");
         assert_eq!(handshake_recv.info_hash, self.info_hash);
-        // assert_eq!(handshake_recv.reserved, [0_u8; 8]); // somehow the server sends 00000004
         Ok(handshake_recv)
+    }
+
+    pub fn has_extensions_enabled(&self) -> bool {
+        let extension_bit = self.reserved[5] & 0x10;
+        extension_bit == 0x10
     }
 }

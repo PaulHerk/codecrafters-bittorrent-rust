@@ -47,19 +47,24 @@ pub(crate) struct PeerStateInner {
     /// the bitfield of the other peer
     pub(crate) has: Mutex<Vec<bool>>,
     /// maps extended message ID to names of extensions
-    pub(crate) extensions: Mutex<HashMap<u8, ExtensionType>>,
+    pub(crate) extensions: Mutex<Option<HashMap<u8, ExtensionType>>>,
 }
 
 impl PeerState {
-    pub(crate) fn new(peer_id: [u8; 20]) -> Self {
+    pub(crate) fn new(handshake: Handshake) -> Self {
+        let extensions = if handshake.has_extensions_enabled() {
+            Some(HashMap::new())
+        } else {
+            None
+        };
         let peer_identifier_inner = PeerStateInner {
-            peer_id,
+            peer_id: handshake.peer_id,
             am_choking: Mutex::new(true),
             am_interested: Mutex::new(false),
             peer_choking: Mutex::new(true),
             peer_interested: Mutex::new(false),
             has: Mutex::new(Vec::new()),
-            extensions: Mutex::new(HashMap::new()),
+            extensions: Mutex::new(extensions),
         };
         Self(Arc::new(peer_identifier_inner))
     }
@@ -109,12 +114,13 @@ impl Peer {
         peer_id: [u8; 20],
         peer_manager_tx: Sender<ReqMsgFromPeer>,
     ) -> Result<Self, PeerError> {
+        // let _ = Handshake::new(info_hash, peer_id).has_extensions_enabled();
         let handshake_recv = Handshake::new(info_hash, peer_id)
             .shake_hands(&mut tcp)
             .await?;
         println!("peer {} connected", tcp.peer_addr().unwrap());
 
-        let peer_state = PeerState::new(handshake_recv.peer_id);
+        let peer_state = PeerState::new(handshake_recv);
 
         // after the handshake as succeeded we can create the message framer that de- & encodes the messages
         // from the tcp stream

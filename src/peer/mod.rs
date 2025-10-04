@@ -13,6 +13,7 @@ use crate::peer_manager::{ReqMessage, ReqMsgFromPeer, ResMessage};
 pub mod conn;
 mod error;
 mod event_loop;
+mod extensions;
 pub mod handshake;
 
 /// this enum is used to select between different stream-types a peer can receive
@@ -24,8 +25,8 @@ pub enum Msg {
     Timeout,
 }
 pub struct Peer {
-    state: PeerState,
-    req_queue: Vec<RequestPiecePayload>,
+    pub(crate) state: PeerState,
+    pub(crate) req_queue: Vec<RequestPiecePayload>,
     peer_manager_tx: mpsc::Sender<ReqMsgFromPeer>,
     peer_writer: PeerWriter,
     // this is an Option because the event-loop takes the Stream and leaves a None in its place while running

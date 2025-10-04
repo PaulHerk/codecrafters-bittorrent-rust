@@ -1,8 +1,9 @@
-use std::mem;
+use std::{collections::HashMap, mem};
 
 use futures_util::StreamExt;
 
 use crate::{
+    extensions::{ExtensionType, handshake::HandshakeExtension},
     messages::{
         PeerMessage,
         payloads::{HavePayload, NoPayload},
@@ -83,6 +84,7 @@ impl Peer {
                             PeerMessage::Bitfield(bitfield_payload) => {
                                 *self.state.0.has.lock().unwrap() =
                                     bitfield_payload.pieces_available;
+                                self.send_extended_handshake().await?;
                                 // TODO: we might want to do it more efficient than requesting the whole queue
                                 // this currently starts the whole loop by setting the interested flag eventually
                                 // self.req_next_block(&mut peer_writer).await?;
@@ -106,10 +108,19 @@ impl Peer {
                                 eprintln!("he sent a keep alive")
                             }
                             PeerMessage::Extended(extension_payload) => {
-                                let extensions = self.state.0.extensions.lock().unwrap();
-                                let extension_type =
-                                    extensions.get(&extension_payload.extension_id);
-                                if let Some(ext_type) = extension_type {}
+                                let maybe_extensions =
+                                    &mut *self.state.0.extensions.lock().unwrap();
+                                if let Some(extensions) = maybe_extensions
+                                    && let Some(ext_type) =
+                                        extensions.get(&extension_payload.extension_id)
+                                {
+                                    if let ExtensionType::Handshake = ext_type {
+                                        // TODO: check if the handshake is valid
+                                        dbg!(serde_bencode::from_bytes::<HandshakeExtension>(
+                                            &extension_payload.data
+                                        )?);
+                                    }
+                                }
                             }
                         }
                     }

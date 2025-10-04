@@ -36,6 +36,8 @@ pub enum PeerError {
     RecvHandshake(io::Error),
     #[error("Failed to decode the handshake received from the peer with the error: `{0}`")]
     DecodeHandshake(#[from] bincode::error::DecodeError),
-    #[error("Failed to decode the handshake received from the peer with the error: `{0}`")]
+    #[error("Failed to encode the handshake to send to the peer with the error: `{0}`")]
     EncodeHandshake(#[from] bincode::error::EncodeError),
+    #[error("Failed to de- or encode the message from/to the peer with the error: `{0}`")]
+    BenCoding(#[from] serde_bencode::Error),
 }
