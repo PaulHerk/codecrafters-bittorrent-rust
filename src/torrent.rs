@@ -85,7 +85,7 @@ pub struct Torrent {
     /// The url of the tracker.
     pub announce: url::Url,
     /// This maps to a dictionary.
-    pub info: Info,
+    pub info: Metainfo,
 }
 
 impl Torrent {
@@ -101,7 +101,7 @@ impl Torrent {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Info {
+pub struct Metainfo {
     /// The name key maps to a UTF-8 encoded string.
     /// In the single file case, the name key is the name of a file, in the muliple file case,
     /// it's the name of a directory.
@@ -121,7 +121,7 @@ pub struct Info {
     pub other: HashMap<String, serde_bencode::value::Value>,
 }
 
-impl Info {
+impl Metainfo {
     pub fn info_hash(&self) -> InfoHash {
         let mut hasher = Sha1::new();
         let bytes = serde_bencode::to_bytes(&self)

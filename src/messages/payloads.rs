@@ -117,9 +117,7 @@ impl Payload for HavePayload {
         }
     }
     fn to_be_bytes(&self) -> Vec<u8> {
-        let mut bytes = vec![0u8; 4];
-        bytes[0..4].copy_from_slice(&self.piece_index.to_be_bytes());
-        bytes
+        self.piece_index.to_be_bytes().to_vec()
     }
 }
 

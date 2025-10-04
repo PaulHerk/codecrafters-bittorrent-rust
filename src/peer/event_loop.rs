@@ -95,10 +95,6 @@ impl Peer {
                                 .await?;
                             }
                             PeerMessage::Piece(response_piece_payload) => {
-                                eprintln!(
-                                    "got {}th block in piece {}",
-                                    response_piece_payload.begin, response_piece_payload.index
-                                );
                                 self.send_peer_manager(ReqMessage::GotBlock(
                                     response_piece_payload,
                                 ))
@@ -112,7 +108,7 @@ impl Peer {
                             PeerMessage::Extended(extension_payload) => {
                                 let extensions = self.state.0.extensions.lock().unwrap();
                                 let extension_type =
-                                    extensions.get(&extension_payload.extension_id).cloned();
+                                    extensions.get(&extension_payload.extension_id);
                                 if let Some(ext_type) = extension_type {}
                             }
                         }

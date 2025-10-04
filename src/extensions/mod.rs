@@ -2,7 +2,7 @@ use bytes::BufMut;
 use serde::{Deserialize, Serialize};
 
 use crate::messages::payloads::Payload;
-pub mod magnet_links;
+// pub mod magnet_links;
 
 /// This Payload is merely a holder for the extended message ID and data.
 /// We can build a full ExtensionPayload directly from the peer since we need the HashMap of the extensions

@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    fs::{File, OpenOptions},
-    path::PathBuf,
-};
+use std::{collections::HashMap, fs::OpenOptions, path::PathBuf};
 
 use tokio::sync::mpsc;
 
@@ -11,17 +7,40 @@ use crate::{
     database::DBConnection,
     messages::payloads::{BitfieldPayload, RequestPiecePayload, ResponsePiecePayload},
     peer::conn::PeerState,
-    peer_manager::error::PeerManagerError,
-    torrent::Info,
+    peer_manager::{error::PeerManagerError, piece_manager::PieceManager},
+    torrent::{InfoHash, Metainfo},
 };
 
 pub mod error;
-mod file_manager;
-mod req_preparer;
+mod piece_manager;
 
 pub const BLOCK_QUEUE_SIZE_MAX: usize = 20;
 /// how many pieces are in the queue at max
 pub(crate) const MAX_PIECES_IN_PARALLEL: usize = 5;
+
+pub struct PeerManager {
+    torrent_state: TorrentState,
+    rx: mpsc::Receiver<ReqMsgFromPeer>,
+    announce_url: url::Url,
+    peers: HashMap<[u8; 20], PeerConn>,
+}
+
+enum TorrentState {
+    // We are waiting for metadata. We only have the info_hash and peers.
+    WaitingForMetadata {
+        info_hash: InfoHash, // metadata_pieces: MetadataPieceManager, // A helper to track downloaded metadata pieces
+    },
+    // We have the metadata and can download the actual files.
+    Downloading {
+        metainfo: Metainfo,
+        piece_manager: PieceManager,
+    },
+    // Optional: A seeding state
+    Seeding {
+        metainfo: Metainfo,
+        // ... state relevant to seeding
+    },
+}
 
 /// A message sent by a local peer to this Manager
 #[derive(Debug, Clone)]
@@ -60,27 +79,23 @@ pub enum ResMessage {
     FinishedFile,
 }
 
-pub struct PeerManager {
-    /// the output file
-    pub(crate) file: File,
-    pub(crate) db_conn: DBConnection,
-    pub(crate) rx: mpsc::Receiver<ReqMsgFromPeer>,
-    /// I need this information too often to always query the DB
-    /// so let's cache it
-    pub(crate) have: Vec<bool>,
-    /// if it's None, we are finished
-    pub(crate) download_queue: Option<Vec<PieceState>>,
-    pub(crate) torrent_info: Info,
-    pub announce_url: url::Url,
-    /// this is also cached, it'll never change
-    pub info_hash_hex: String,
-    pub(crate) peers: HashMap<[u8; 20], PeerConn>,
-}
-
 #[derive(Debug, Clone)]
 pub struct PeerConn {
     pub(super) sender: mpsc::Sender<ResMessage>,
     pub(super) identifier: PeerState,
+}
+
+impl PeerConn {
+    async fn send(&self, msg: ResMessage, peer_id: [u8; 20]) -> Result<(), PeerManagerError> {
+        self.sender
+            .send(msg)
+            .await
+            .map_err(|error| PeerManagerError::SendError {
+                peer_id,
+                error,
+                msg: "sending a message".to_string(),
+            })
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -112,39 +127,46 @@ impl PeerManager {
         file_path: Option<PathBuf>,
         torrent: Torrent,
     ) -> Result<Self, PeerManagerError> {
-        let db_conn = DBConnection::new().await?;
+        let db_conn = DBConnection::new(torrent.info.info_hash()).await?;
         let file_path = file_path.unwrap_or(torrent.info.name.clone().into());
-        let info_hash = torrent.info.info_hash();
-        let file_info = db_conn
-            .set_and_get_file(file_path, &info_hash, torrent.info, torrent.announce)
-            .await?;
+        let file_entry = db_conn.get_entry().await?;
+        let file_existed = file_entry.is_some();
+        let file_entry = if let Some(file_entry) = file_entry {
+            file_entry
+        } else {
+            db_conn.set_entry(file_path, torrent).await?
+        };
 
         let file = OpenOptions::new()
-            .create(true)
+            .create(!file_existed)
             .append(true)
             .truncate(false)
-            .open(&file_info.file)
+            .open(&file_entry.file)
             .map_err(|error| PeerManagerError::OpenError {
-                path: file_info.file.to_path_buf(),
+                path: file_entry.file.to_path_buf(),
                 error,
             })?;
 
-        let download_state = if file_info.is_finished() {
-            None
+        let download_queue = if file_entry.is_finished() {
+            todo!("seeding state")
         } else {
-            Some(Vec::with_capacity(MAX_PIECES_IN_PARALLEL))
+            Vec::with_capacity(MAX_PIECES_IN_PARALLEL)
         };
-        let info_hash_hex = hex::encode(info_hash.0);
+
+        let torrent_state = TorrentState::Downloading {
+            metainfo: file_entry.torrent_info,
+            piece_manager: PieceManager {
+                have: file_entry.bitfield.to_vec(),
+                download_queue,
+                db_conn,
+                file,
+            },
+        };
 
         Ok(Self {
-            file,
-            db_conn,
+            torrent_state,
             rx,
-            have: file_info.bitfield.to_vec(),
-            download_queue: download_state,
-            torrent_info: file_info.torrent_info,
-            announce_url: file_info.announce,
-            info_hash_hex,
+            announce_url: file_entry.announce,
             peers: HashMap::new(),
         })
     }
@@ -156,33 +178,65 @@ impl PeerManager {
                     self.peers.insert(peer_msg.peer_id, peer_conn);
                 }
                 ReqMessage::GotBlock(block) => {
-                    if let Some(piece_index) = self.write_block(block).await? {
+                    if let TorrentState::Downloading {
+                        metainfo,
+                        piece_manager,
+                    } = &mut self.torrent_state
+                        && let Some(piece_index) =
+                            piece_manager.write_block(block, metainfo).await?
+                    {
                         let msg = ResMessage::FinishedPiece(piece_index);
-                        self.send_peer(&peer_msg.peer_id, msg).await?;
-                    };
+                        eprintln!("Finished piece number {piece_index}.");
+                        if piece_manager.is_finished() {
+                            self.broadcast_peers(ResMessage::FinishedFile).await?;
+                        }
+                        self.broadcast_peers(msg).await?;
+                    }
                 }
                 ReqMessage::NeedBlock(block) => {
-                    if self.have[block.index as usize] {
-                        let block = self.get_block(block);
-                        let msg = ResMessage::Block(block);
-                        self.send_peer(&peer_msg.peer_id, msg).await?;
-                    } else {
-                        todo!(
-                            "send a message to the peer that we don't have the block? (not sure if there's a message type for this)"
-                        );
+                    if let TorrentState::Downloading {
+                        metainfo,
+                        piece_manager,
+                    } = &self.torrent_state
+                    {
+                        if piece_manager.have[block.index as usize] {
+                            let block = piece_manager.get_block(block, metainfo);
+                            let msg = ResMessage::Block(block);
+                            self.send_peer(peer_msg.peer_id, msg).await?;
+                        } else {
+                            todo!(
+                                "send a message to the peer that we don't have the block? (not sure if there's a message type for this)"
+                            );
+                        }
                     }
                 }
                 ReqMessage::NeedBlockQueue => {
                     let peer_has = self.get_peer_has(&peer_msg.peer_id)?;
-                    let blocks = self.prepare_next_blocks(BLOCK_QUEUE_SIZE_MAX, peer_has);
-                    let msg = ResMessage::NewBlockQueue(blocks);
-                    self.send_peer(&peer_msg.peer_id, msg).await?;
+                    if let TorrentState::Downloading {
+                        metainfo,
+                        piece_manager,
+                    } = &mut self.torrent_state
+                    {
+                        let blocks = piece_manager.prepare_next_blocks(
+                            BLOCK_QUEUE_SIZE_MAX,
+                            peer_has,
+                            metainfo,
+                        );
+                        let msg = ResMessage::NewBlockQueue(blocks);
+                        self.send_peer(peer_msg.peer_id, msg).await?;
+                    }
                 }
                 ReqMessage::WhatDoWeHave => {
-                    let msg = ResMessage::WeHave(BitfieldPayload {
-                        pieces_available: self.have.clone(),
-                    });
-                    self.send_peer(&peer_msg.peer_id, msg).await?;
+                    if let TorrentState::Downloading {
+                        metainfo: _,
+                        piece_manager,
+                    } = &self.torrent_state
+                    {
+                        let msg = ResMessage::WeHave(BitfieldPayload {
+                            pieces_available: piece_manager.have.clone(),
+                        });
+                        self.send_peer(peer_msg.peer_id, msg).await?;
+                    }
                 }
             }
         }
@@ -192,21 +246,14 @@ impl PeerManager {
 
     async fn send_peer(
         &mut self,
-        peer_id: &[u8; 20],
+        peer_id: [u8; 20],
         msg: ResMessage,
     ) -> Result<(), PeerManagerError> {
         let peer = self
             .peers
-            .get_mut(peer_id)
+            .get_mut(&peer_id)
             .ok_or(PeerManagerError::PeerNotFound)?;
-        peer.sender
-            .send(msg)
-            .await
-            .map_err(|error| PeerManagerError::SendError {
-                peer_id: *peer_id,
-                error,
-                msg: "Sending a message.".to_string(),
-            })
+        peer.send(msg, peer_id).await
     }
 
     fn get_peer_has(&self, peer_id: &[u8; 20]) -> Result<Vec<bool>, PeerManagerError> {
@@ -220,5 +267,13 @@ impl PeerManager {
             .lock()
             .unwrap()
             .clone())
+    }
+
+    async fn broadcast_peers(&mut self, msg: ResMessage) -> Result<(), PeerManagerError> {
+        for (&peer_id, conn) in self.peers.iter() {
+            conn.send(msg.clone(), peer_id).await?;
+        }
+
+        Ok(())
     }
 }

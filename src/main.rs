@@ -1,6 +1,6 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use codecrafters_bittorrent::magnet_links::MagnetLink;
+// use codecrafters_bittorrent::magnet_links::MagnetLink;
 use codecrafters_bittorrent::{Peer, PeerManager, Torrent, TrackerRequest};
 use std::error::Error;
 use std::net::{Ipv4Addr, SocketAddrV4};
@@ -186,10 +186,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
             output,
             magnet_link,
         } => {
-            let (peer_manager_tx, rx) = mpsc::channel(64);
-            let peer_manager =
-                PeerManager::init_from_magnet(rx, output.clone(), magnet_link, PEER_ID, PEER_PORT)
-                    .await?;
+            // let (peer_manager_tx, rx) = mpsc::channel(64);
+            // let peer_manager =
+            //     PeerManager::init_from_magnet(rx, output.clone(), magnet_link, PEER_ID, PEER_PORT)
+            //         .await?;
         }
     }
 
