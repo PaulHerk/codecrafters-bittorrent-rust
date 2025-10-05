@@ -8,8 +8,9 @@ use crate::{
     tracker::TrackerRequestError,
 };
 
-mod before_download_manager;
-mod peer_manager_init;
+// mod before_download_manager;
+// mod peer_manager_init;
+pub(crate) mod metadata_piece_manager;
 
 const INFO_HASH_PREFIX: &'static str = "urn:btih";
 mod des_info_hash {
@@ -66,14 +67,14 @@ mod des_info_hash {
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct MagnetLink {
     #[serde(rename = "xt")]
     pub info_hash: InfoHash,
     #[serde(rename = "dn")]
     file_name: Option<String>,
     #[serde(rename = "tr")]
-    pub announce: Option<url::Url>,
+    announce: Option<url::Url>,
     #[serde(rename = "x.pe")]
     peer_addr: Option<SocketAddrV4>,
 }
@@ -87,6 +88,9 @@ impl MagnetLink {
         let query = url.query().ok_or(MagnetLinkError::NoQueryFound)?;
         let magnet_link = serde_urlencoded::from_str(query)?;
         Ok(magnet_link)
+    }
+    pub fn get_announce_url(&self) -> Result<url::Url, MagnetLinkError> {
+        self.announce.clone().ok_or(MagnetLinkError::NoTrackerUrl)
     }
 }
 
@@ -102,13 +106,6 @@ pub enum MagnetLinkError {
     FailedToDesQuery(#[from] serde_urlencoded::de::Error),
     #[error("downloading from a magnetlink without a provided tracker url isn't supported")]
     NoTrackerUrl,
-
-    #[error("Failed in the Peer Manager with the error: `{0}`")]
-    PeerManagerError(#[from] PeerManagerError),
-    #[error("Error happened in the database when initializing.")]
-    DBError(#[from] DBError),
-    #[error(transparent)]
-    TrackerError(#[from] TrackerRequestError),
 }
 
 #[cfg(test)]

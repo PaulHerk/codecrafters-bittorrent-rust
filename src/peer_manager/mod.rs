@@ -5,6 +5,7 @@ use tokio::sync::mpsc;
 use crate::{
     Torrent,
     database::DBConnection,
+    extensions::magnet_links::{MagnetLink, metadata_piece_manager::MetadataPieceManager},
     messages::payloads::{BitfieldPayload, RequestPiecePayload, ResponsePiecePayload},
     peer::conn::PeerState,
     peer_manager::{error::PeerManagerError, piece_manager::PieceManager},
@@ -28,7 +29,7 @@ pub struct PeerManager {
 enum TorrentState {
     // We are waiting for metadata. We only have the info_hash and peers.
     WaitingForMetadata {
-        info_hash: InfoHash, // metadata_pieces: MetadataPieceManager, // A helper to track downloaded metadata pieces
+        metadata_piece_manager: MetadataPieceManager, // A helper to track downloaded metadata pieces
     },
     // We have the metadata and can download the actual files.
     Downloading {
@@ -122,6 +123,27 @@ impl BlockState {
 }
 
 impl PeerManager {
+    pub async fn init_from_magnet(
+        rx: mpsc::Receiver<ReqMsgFromPeer>,
+        file_path: Option<PathBuf>,
+        magnet_link: MagnetLink,
+    ) -> Result<Self, PeerManagerError> {
+        let db_conn = DBConnection::new(magnet_link.info_hash).await?;
+        if let Some(file_entry) = db_conn.get_entry().await? {
+            todo!("return Ok(Self {{...}})")
+        } else {
+            let torrent_state = TorrentState::WaitingForMetadata {
+                metadata_piece_manager: MetadataPieceManager::new(magnet_link.info_hash),
+            };
+            return Ok(Self {
+                torrent_state,
+                rx,
+                announce_url: magnet_link.get_announce_url()?,
+                peers: HashMap::new(),
+            });
+        }
+    }
+
     pub async fn init_from_torrent(
         rx: mpsc::Receiver<ReqMsgFromPeer>,
         file_path: Option<PathBuf>,
@@ -188,6 +210,9 @@ impl PeerManager {
                         let msg = ResMessage::FinishedPiece(piece_index);
                         eprintln!("Finished piece number {piece_index}.");
                         if piece_manager.is_finished() {
+                            self.torrent_state = TorrentState::Seeding {
+                                metainfo: metainfo.clone(),
+                            };
                             self.broadcast_peers(ResMessage::FinishedFile).await?;
                         }
                         self.broadcast_peers(msg).await?;

@@ -11,7 +11,7 @@ impl Peer {
             let handshake_extension = HandshakeExtension::new();
             self.send_peer(PeerMessage::Extended(BasicExtensionPayload {
                 extension_id: 0,
-                data: serde_bencode::to_bytes(&dbg!(handshake_extension))?,
+                data: serde_bencode::to_bytes(&handshake_extension)?,
             }))
             .await?;
         }

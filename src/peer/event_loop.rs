@@ -97,6 +97,10 @@ impl Peer {
                                 .await?;
                             }
                             PeerMessage::Piece(response_piece_payload) => {
+                                eprintln!(
+                                    "got {}th block in piece {}",
+                                    response_piece_payload.begin, response_piece_payload.index
+                                );
                                 self.send_peer_manager(ReqMessage::GotBlock(
                                     response_piece_payload,
                                 ))
@@ -110,15 +114,16 @@ impl Peer {
                             PeerMessage::Extended(extension_payload) => {
                                 let maybe_extensions =
                                     &mut *self.state.0.extensions.lock().unwrap();
-                                if let Some(extensions) = maybe_extensions
-                                    && let Some(ext_type) =
-                                        extensions.get(&extension_payload.extension_id)
-                                {
-                                    if let ExtensionType::Handshake = ext_type {
-                                        // TODO: check if the handshake is valid
+                                if let Some(extensions) = maybe_extensions {
+                                    if extension_payload.extension_id
+                                        == ExtensionType::Handshake as u8
+                                    {
                                         dbg!(serde_bencode::from_bytes::<HandshakeExtension>(
                                             &extension_payload.data
                                         )?);
+                                    } else if let Some(ext_type) =
+                                        extensions.get(&extension_payload.extension_id)
+                                    {
                                     }
                                 }
                             }

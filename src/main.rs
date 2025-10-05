@@ -1,5 +1,6 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
+use codecrafters_bittorrent::magnet_links::MagnetLink;
 // use codecrafters_bittorrent::magnet_links::MagnetLink;
 use codecrafters_bittorrent::{Peer, PeerManager, Torrent, TrackerRequest};
 use std::error::Error;
@@ -186,10 +187,37 @@ async fn main() -> Result<(), Box<dyn Error>> {
             output,
             magnet_link,
         } => {
-            // let (peer_manager_tx, rx) = mpsc::channel(64);
-            // let peer_manager =
-            //     PeerManager::init_from_magnet(rx, output.clone(), magnet_link, PEER_ID, PEER_PORT)
-            //         .await?;
+            let (peer_manager_tx, rx) = mpsc::channel(64);
+            let magnet_link = MagnetLink::from_url(magnet_link)?;
+            let peer_manager =
+                PeerManager::init_from_magnet(rx, output.clone(), magnet_link.clone()).await?;
+
+            // using 999 as a placeholder since we don't know the length yet
+            let tracker = TrackerRequest::new(&magnet_link.info_hash, PEER_ID, PEER_PORT, 999);
+            let response = tracker
+                .get_response(magnet_link.get_announce_url()?)
+                .await?;
+
+            tokio::spawn(async move {
+                let _ = peer_manager.run().await;
+            });
+
+            for &addr in response.peers.0.iter() {
+                let peer_manager_tx = peer_manager_tx.clone();
+                tokio::spawn(async move {
+                    let peer = Peer::connect_from_addr(
+                        addr,
+                        magnet_link.info_hash,
+                        *PEER_ID,
+                        peer_manager_tx,
+                    )
+                    .await
+                    .context("initializing peer")
+                    .unwrap();
+                    peer.run().await.unwrap();
+                });
+            }
+            loop {}
         }
     }
 
