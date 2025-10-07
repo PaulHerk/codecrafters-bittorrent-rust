@@ -1,7 +1,8 @@
 use bytes::BufMut;
 use serde::{Deserialize, Serialize};
 
-use crate::messages::payloads::Payload;
+use crate::messages::{PeerMessage, payloads::Payload};
+pub(crate) mod factory;
 pub(crate) mod handshake;
 pub mod magnet_links;
 
@@ -27,6 +28,36 @@ impl Payload for BasicExtensionPayload {
         bytes.extend_from_slice(&self.data);
         bytes
     }
+}
+
+/// Represents an action that the Peer should take after an extension message is handled.
+#[derive(Debug)]
+pub enum ExtensionAction {
+    /// Send a message back to the remote peer.
+    SendMessage(PeerMessage),
+    /// Send a request to the PeerManager.
+    RequestToManager(ExtensionMessage),
+    /// Do nothing.
+    Nothing,
+}
+
+/// A message type specifically for communication from an extension to the PeerManager.
+#[derive(Clone, Debug)]
+pub enum ExtensionMessage {
+    NeedMetadataPiece,
+    ReceivedMetadataPiece { piece_index: u32, data: Vec<u8> },
+}
+
+/// The core trait for handling extension-specific logic.
+pub trait ExtensionHandler: Send + Sync + std::fmt::Debug {
+    /// Called when a new extension message is received from the peer.
+    /// It takes the raw payload of the extension message.
+    fn handle_message(&self, data: &[u8]) -> ExtensionAction;
+
+    /// Called periodically or on specific events (like the initial handshake).
+    /// This allows the extension to proactively send messages.
+    /// For example, the metadata extension could use this to start requesting pieces.
+    fn on_handshake(&self) -> ExtensionAction;
 }
 
 /// Enum that represents the currently supportet Extensions

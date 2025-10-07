@@ -14,7 +14,7 @@ pub enum YourIp {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct HandshakeExtension {
-    pub m: HashMap<String, usize>,
+    pub m: HashMap<String, u8>,
     #[serde(flatten)]
     other: Other,
 }
@@ -40,7 +40,7 @@ impl HandshakeExtension {
     pub fn new() -> Self {
         let mut m = HashMap::new();
         for &ext in crate::extensions::ACTIVE_EXTENSIONS {
-            m.insert(format!("{ext:?}"), ext as usize);
+            m.insert(format!("{ext:?}"), ext as u8);
         }
         Self {
             m,

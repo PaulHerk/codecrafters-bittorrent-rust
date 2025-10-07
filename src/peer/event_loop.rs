@@ -3,7 +3,7 @@ use std::{collections::HashMap, mem};
 use futures_util::StreamExt;
 
 use crate::{
-    extensions::{ExtensionType, handshake::HandshakeExtension},
+    extensions::{ExtensionType, factory::ExtensionFactory, handshake::HandshakeExtension},
     messages::{
         PeerMessage,
         payloads::{HavePayload, NoPayload},
@@ -112,20 +112,7 @@ impl Peer {
                                 eprintln!("he sent a keep alive")
                             }
                             PeerMessage::Extended(extension_payload) => {
-                                let maybe_extensions =
-                                    &mut *self.state.0.extensions.lock().unwrap();
-                                if let Some(extensions) = maybe_extensions {
-                                    if extension_payload.extension_id
-                                        == ExtensionType::Handshake as u8
-                                    {
-                                        dbg!(serde_bencode::from_bytes::<HandshakeExtension>(
-                                            &extension_payload.data
-                                        )?);
-                                    } else if let Some(ext_type) =
-                                        extensions.get(&extension_payload.extension_id)
-                                    {
-                                    }
-                                }
+                                self.on_extension_data(extension_payload).await?;
                             }
                         }
                     }

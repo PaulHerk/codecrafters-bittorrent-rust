@@ -18,6 +18,7 @@ use tokio::sync::mpsc::Sender;
 use tokio_util::codec::Framed;
 use tokio_util::time::FutureExt;
 
+use crate::extensions::ExtensionHandler;
 use crate::extensions::ExtensionType;
 use crate::messages::{MessageFramer, PeerMessage};
 use crate::peer::Msg;
@@ -47,7 +48,7 @@ pub(crate) struct PeerStateInner {
     /// the bitfield of the other peer
     pub(crate) has: Mutex<Vec<bool>>,
     /// maps extended message ID to names of extensions
-    pub(crate) extensions: Mutex<Option<HashMap<u8, ExtensionType>>>,
+    pub(crate) extensions: Mutex<Option<HashMap<u8, Box<dyn ExtensionHandler>>>>,
 }
 
 impl PeerState {

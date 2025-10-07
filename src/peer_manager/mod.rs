@@ -5,7 +5,10 @@ use tokio::sync::mpsc;
 use crate::{
     Torrent,
     database::DBConnection,
-    extensions::magnet_links::{MagnetLink, metadata_piece_manager::MetadataPieceManager},
+    extensions::{
+        ExtensionMessage,
+        magnet_links::{MagnetLink, metadata_piece_manager::MetadataPieceManager},
+    },
     messages::payloads::{BitfieldPayload, RequestPiecePayload, ResponsePiecePayload},
     peer::conn::PeerState,
     peer_manager::{error::PeerManagerError, piece_manager::PieceManager},
@@ -51,6 +54,7 @@ pub enum ReqMessage {
     GotBlock(ResponsePiecePayload),
     NeedBlock(RequestPiecePayload),
     WhatDoWeHave,
+    Extension(ExtensionMessage),
 }
 
 pub struct ReqMsgFromPeer {
@@ -263,6 +267,7 @@ impl PeerManager {
                         self.send_peer(peer_msg.peer_id, msg).await?;
                     }
                 }
+                ReqMessage::Extension(extension_message) => todo!(),
             }
         }
 
