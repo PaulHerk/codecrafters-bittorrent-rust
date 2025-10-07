@@ -31,18 +31,18 @@ impl Payload for BasicExtensionPayload {
 }
 
 /// Represents an action that the Peer should take after an extension message is handled.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ExtensionAction {
     /// Send a message back to the remote peer.
-    SendMessage(PeerMessage),
+    SendPeer(PeerMessage),
     /// Send a request to the PeerManager.
-    RequestToManager(ExtensionMessage),
+    SendPeerManager(ExtensionMessage),
     /// Do nothing.
     Nothing,
 }
 
 /// A message type specifically for communication from an extension to the PeerManager.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ExtensionMessage {
     NeedMetadataPiece,
     ReceivedMetadataPiece { piece_index: u32, data: Vec<u8> },

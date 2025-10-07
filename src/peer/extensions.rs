@@ -53,8 +53,8 @@ impl Peer {
 
     async fn handle_action(&mut self, action: ExtensionAction) -> Result<(), PeerError> {
         match action {
-            ExtensionAction::SendMessage(peer_message) => self.send_peer(peer_message).await,
-            ExtensionAction::RequestToManager(extension_message) => {
+            ExtensionAction::SendPeer(peer_message) => self.send_peer(peer_message).await,
+            ExtensionAction::SendPeerManager(extension_message) => {
                 self.send_peer_manager(crate::peer_manager::ReqMessage::Extension(
                     extension_message,
                 ))

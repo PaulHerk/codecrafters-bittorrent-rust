@@ -267,7 +267,22 @@ impl PeerManager {
                         self.send_peer(peer_msg.peer_id, msg).await?;
                     }
                 }
-                ReqMessage::Extension(extension_message) => todo!(),
+                ReqMessage::Extension(extension_message) => {
+                    if let TorrentState::WaitingForMetadata {
+                        metadata_piece_manager,
+                    } = &mut self.torrent_state
+                    {
+                        if let ExtensionMessage::NeedMetadataPiece = extension_message {
+                            todo!()
+                        } else if let ExtensionMessage::ReceivedMetadataPiece {
+                            piece_index,
+                            data,
+                        } = extension_message
+                        {
+                            metadata_piece_manager.add_block(piece_index, data.to_vec());
+                        }
+                    }
+                }
             }
         }
 
