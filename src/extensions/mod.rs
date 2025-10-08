@@ -72,6 +72,7 @@ pub trait ExtensionHandler: Send + Sync + std::fmt::Debug {
 /// Enum that represents the currently supportet Extensions
 #[derive(Debug, Display, EnumString, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
 pub enum ExtensionType {
+    #[strum(disabled)]
     Handshake,
     #[strum(to_string = "ut_metadata")]
     Metadata,

@@ -5,7 +5,7 @@ use sha1::{Digest, Sha1};
 
 use crate::{
     magnet_links::metadata_requester::{MetadataMsg, MetadataMsgType},
-    torrent::InfoHash,
+    torrent::{InfoHash, Metainfo},
 };
 
 /// The metadata is handled in blocks of 16KiB (16384 Bytes).
@@ -15,7 +15,7 @@ const METADATA_BLOCK_SIZE: usize = 16384;
 pub(crate) struct MetadataPieceManager {
     queue: Vec<bool>,
     bytes: Cursor<Vec<u8>>,
-    info_hash: InfoHash,
+    pub info_hash: InfoHash,
 }
 
 impl MetadataPieceManager {
@@ -69,5 +69,9 @@ impl MetadataPieceManager {
             }
         }
         false
+    }
+
+    pub(crate) fn get_metadata(&self) -> Result<Metainfo, serde_bencode::Error> {
+        serde_bencode::from_bytes(self.bytes.get_ref())
     }
 }

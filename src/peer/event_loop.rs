@@ -85,60 +85,52 @@ impl Peer {
                                 self.send_peer(msg).await?;
                             }
                         }
-                    },
-                    Msg::Data(message) => {
-                        match message {
-                            PeerMessage::Choke(_no_payload) => {
-                                *self.state.0.peer_choking.lock().unwrap() = true;
-                            }
-                            PeerMessage::Unchoke(_no_payload) => {
-                                *self.state.0.peer_choking.lock().unwrap() = false
-                            }
-                            PeerMessage::Interested(_no_payload) => {
-                                *self.state.0.peer_interested.lock().unwrap() = true
-                            }
-                            PeerMessage::NotInterested(_no_payload) => {
-                                *self.state.0.peer_interested.lock().unwrap() = false
-                            }
-                            PeerMessage::Have(have_payload) => {
-                                self.state.0.has.lock().unwrap()
-                                    [have_payload.piece_index as usize] = true;
-                            }
-                            PeerMessage::Bitfield(bitfield_payload) => {
-                                *self.state.0.has.lock().unwrap() =
-                                    bitfield_payload.pieces_available;
-                                self.send_extended_handshake().await?;
-                                // TODO: we might want to do it more efficient than requesting the whole queue
-                                // this currently starts the whole loop by setting the interested flag eventually
-                                // self.req_next_block(&mut peer_writer).await?;
-                                self.send_peer_manager(ReqMessage::NeedBlockQueue).await?;
-                            }
-                            PeerMessage::Request(request_piece_payload) => {
-                                self.send_peer_manager(ReqMessage::NeedBlock(
-                                    request_piece_payload,
-                                ))
-                                .await?;
-                            }
-                            PeerMessage::Piece(response_piece_payload) => {
-                                eprintln!(
-                                    "got {}th block in piece {}",
-                                    response_piece_payload.begin, response_piece_payload.index
-                                );
-                                self.send_peer_manager(ReqMessage::GotBlock(
-                                    response_piece_payload,
-                                ))
-                                .await?;
-                                blocks_left_for_queue -= 1;
-                            }
-                            PeerMessage::Cancel(_request_piece_payload) => todo!(),
-                            PeerMessage::KeepAlive(_no_payload) => {
-                                eprintln!("he sent a keep alive")
-                            }
-                            PeerMessage::Extended(extension_payload) => {
-                                self.on_extension_data(extension_payload).await?;
-                            }
+                        ResMessage::StartDownload => {
+                            self.send_peer_manager(ReqMessage::NeedBlockQueue).await?;
                         }
-                    }
+                    },
+                    Msg::Data(message) => match message {
+                        PeerMessage::Choke(_no_payload) => {
+                            *self.state.0.peer_choking.lock().unwrap() = true;
+                        }
+                        PeerMessage::Unchoke(_no_payload) => {
+                            *self.state.0.peer_choking.lock().unwrap() = false
+                        }
+                        PeerMessage::Interested(_no_payload) => {
+                            *self.state.0.peer_interested.lock().unwrap() = true
+                        }
+                        PeerMessage::NotInterested(_no_payload) => {
+                            *self.state.0.peer_interested.lock().unwrap() = false
+                        }
+                        PeerMessage::Have(have_payload) => {
+                            self.state.0.has.lock().unwrap()[have_payload.piece_index as usize] =
+                                true;
+                        }
+                        PeerMessage::Bitfield(bitfield_payload) => {
+                            *self.state.0.has.lock().unwrap() = bitfield_payload.pieces_available;
+                            self.send_extended_handshake().await?;
+                        }
+                        PeerMessage::Request(request_piece_payload) => {
+                            self.send_peer_manager(ReqMessage::NeedBlock(request_piece_payload))
+                                .await?;
+                        }
+                        PeerMessage::Piece(response_piece_payload) => {
+                            eprintln!(
+                                "got {}th block in piece {}",
+                                response_piece_payload.begin, response_piece_payload.index
+                            );
+                            self.send_peer_manager(ReqMessage::GotBlock(response_piece_payload))
+                                .await?;
+                            blocks_left_for_queue -= 1;
+                        }
+                        PeerMessage::Cancel(_request_piece_payload) => todo!(),
+                        PeerMessage::KeepAlive(_no_payload) => {
+                            eprintln!("he sent a keep alive")
+                        }
+                        PeerMessage::Extended(extension_payload) => {
+                            self.on_extension_data(extension_payload).await?;
+                        }
+                    },
                     Msg::Timeout => {
                         self.send_peer(PeerMessage::KeepAlive(NoPayload)).await?;
                     }

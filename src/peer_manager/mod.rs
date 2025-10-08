@@ -32,6 +32,7 @@ pub struct PeerManager {
 enum TorrentState {
     // We are waiting for metadata. We only have the info_hash and peers.
     WaitingForMetadata {
+        file_path: Option<PathBuf>,
         metadata_piece_manager: MetadataPieceManager, // A helper to track downloaded metadata pieces
     },
     // We have the metadata and can download the actual files.
@@ -77,6 +78,8 @@ pub struct ReqMsgFromPeer {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ResMessage {
+    /// indication to the peer to start the download loop
+    StartDownload,
     NewBlockQueue(Vec<RequestPiecePayload>),
     Block(Option<ResponsePiecePayload>),
     WeHave(BitfieldPayload),
@@ -140,6 +143,7 @@ impl PeerManager {
             todo!("return Ok(Self {{...}})")
         } else {
             let torrent_state = TorrentState::WaitingForMetadata {
+                file_path,
                 metadata_piece_manager: MetadataPieceManager::new(magnet_link.info_hash),
             };
             return Ok(Self {
@@ -156,51 +160,28 @@ impl PeerManager {
         file_path: Option<PathBuf>,
         torrent: Torrent,
     ) -> Result<Self, PeerManagerError> {
-        let db_conn = DBConnection::new(torrent.info.info_hash()).await?;
-        let file_path = file_path.unwrap_or(torrent.info.name.clone().into());
-        let file_entry = db_conn.get_entry().await?;
-        let file_existed = file_entry.is_some();
-        let file_entry = if let Some(file_entry) = file_entry {
-            file_entry
-        } else {
-            db_conn.set_entry(file_path, torrent).await?
-        };
-
-        let file = OpenOptions::new()
-            .create(!file_existed)
-            .append(true)
-            .truncate(false)
-            .open(&file_entry.file)
-            .map_err(|error| PeerManagerError::OpenError {
-                path: file_entry.file.to_path_buf(),
-                error,
-            })?;
-
-        let download_queue = if file_entry.is_finished() {
-            todo!("seeding state")
-        } else {
-            Vec::with_capacity(MAX_PIECES_IN_PARALLEL)
-        };
-
+        let info_hash = torrent.info.info_hash();
         let torrent_state = TorrentState::Downloading {
-            metainfo: file_entry.torrent_info,
-            piece_manager: PieceManager {
-                have: file_entry.bitfield.to_vec(),
-                download_queue,
-                db_conn,
-                file,
-            },
+            metainfo: torrent.info.clone(),
+            piece_manager: PieceManager::new(info_hash, file_path, &torrent).await?,
         };
 
         Ok(Self {
             torrent_state,
             rx,
-            announce_url: file_entry.announce,
+            announce_url: torrent.announce,
             peers: HashMap::new(),
         })
     }
 
     pub async fn run(mut self) -> Result<(), PeerManagerError> {
+        if let TorrentState::Downloading {
+            metainfo: _,
+            piece_manager: _,
+        } = self.torrent_state
+        {
+            self.broadcast_peers(ResMessage::StartDownload).await?;
+        }
         while let Some(peer_msg) = self.rx.recv().await {
             match peer_msg.msg {
                 ReqMessage::NewConnection(peer_conn) => {
@@ -272,6 +253,7 @@ impl PeerManager {
                 }
                 ReqMessage::Extension(extension_message) => {
                     if let TorrentState::WaitingForMetadata {
+                        file_path,
                         metadata_piece_manager,
                     } = &mut self.torrent_state
                     {
@@ -286,7 +268,23 @@ impl PeerManager {
                                 metadata_piece_manager.add_block(piece_index, data.to_vec())?;
                                 if metadata_piece_manager.check_finished() {
                                     println!("WE'RE FINISHED");
-                                    todo!("switch state")
+
+                                    let metainfo = metadata_piece_manager.get_metadata().expect("This shouldn't fail since we checked that the hashes match.");
+                                    let torrent = Torrent {
+                                        announce: self.announce_url.clone(),
+                                        info: metainfo,
+                                    };
+                                    let piece_manager = PieceManager::new(
+                                        metadata_piece_manager.info_hash,
+                                        file_path.clone(),
+                                        &torrent,
+                                    )
+                                    .await?;
+                                    self.torrent_state = TorrentState::Downloading {
+                                        metainfo: torrent.info,
+                                        piece_manager,
+                                    };
+                                    self.broadcast_peers(ResMessage::StartDownload).await?;
                                 }
                             }
                             ExtensionMessage::GotMetadataLength(length) => {
