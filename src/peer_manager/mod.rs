@@ -6,7 +6,7 @@ use crate::{
     Torrent,
     database::DBConnection,
     extensions::{
-        ExtensionMessage,
+        ExtensionMessage, ExtensionType,
         magnet_links::{MagnetLink, metadata_piece_manager::MetadataPieceManager},
     },
     messages::payloads::{BitfieldPayload, RequestPiecePayload, ResponsePiecePayload},
@@ -82,6 +82,9 @@ pub enum ResMessage {
     WeHave(BitfieldPayload),
     FinishedPiece(u32),
     FinishedFile,
+    /// Data that is passed to BasicExtensionPayload.
+    /// The peer has to 'add' the extended_msg_id itself since it is peer-dependent
+    ExtensionData((ExtensionType, Vec<u8>)),
 }
 
 #[derive(Debug, Clone)]
@@ -272,14 +275,23 @@ impl PeerManager {
                         metadata_piece_manager,
                     } = &mut self.torrent_state
                     {
-                        if let ExtensionMessage::NeedMetadataPiece = extension_message {
-                            todo!()
-                        } else if let ExtensionMessage::ReceivedMetadataPiece {
-                            piece_index,
-                            data,
-                        } = extension_message
-                        {
-                            metadata_piece_manager.add_block(piece_index, data.to_vec());
+                        match extension_message {
+                            ExtensionMessage::NeedMetadataPiece => {
+                                let msg = get_metadata_msg(metadata_piece_manager)?;
+                                if let Some(msg) = msg {
+                                    self.send_peer(peer_msg.peer_id, msg).await?;
+                                }
+                            }
+                            ExtensionMessage::ReceivedMetadataPiece { piece_index, data } => {
+                                metadata_piece_manager.add_block(piece_index, data.to_vec())?;
+                                if metadata_piece_manager.check_finished() {
+                                    println!("WE'RE FINISHED");
+                                    todo!("switch state")
+                                }
+                            }
+                            ExtensionMessage::GotMetadataLength(length) => {
+                                metadata_piece_manager.clear_and_set_len(length);
+                            }
                         }
                     }
                 }
@@ -320,5 +332,23 @@ impl PeerManager {
         }
 
         Ok(())
+    }
+}
+
+/// helper function that get's the new blocks to be added and creates a message of it
+fn get_metadata_msg(
+    metadata_piece_manager: &mut MetadataPieceManager,
+) -> Result<Option<ResMessage>, PeerManagerError> {
+    let new_data = metadata_piece_manager
+        .get_block_req_data()
+        .map_err(|e| PeerManagerError::Other(Box::new(e)))?;
+
+    if let Some(data) = new_data {
+        Ok(Some(ResMessage::ExtensionData((
+            ExtensionType::Metadata,
+            data,
+        ))))
+    } else {
+        Ok(None)
     }
 }

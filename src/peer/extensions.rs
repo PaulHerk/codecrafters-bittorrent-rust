@@ -1,3 +1,4 @@
+use std::boxed::Box;
 use std::collections::HashMap;
 
 use crate::{
@@ -44,7 +45,6 @@ impl Peer {
             }
         };
 
-        dbg!(&actions_to_do);
         for action in actions_to_do {
             self.handle_action(action).await?;
         }
@@ -61,6 +61,12 @@ impl Peer {
                 .await
             }
             ExtensionAction::Nothing => Ok(()),
+            ExtensionAction::Multiple(actions) => {
+                for action in actions.into_iter() {
+                    Box::pin(self.handle_action(action)).await?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -79,8 +85,7 @@ fn update_extensions(
         let Some(new_extension) = ExtensionFactory::build(&msg_type) else {
             continue;
         };
-        dbg!(&new_extension);
-        actions.push(new_extension.on_handshake());
+        actions.push(new_extension.on_handshake(&handshake.other));
         extensions.insert(msg_id, new_extension);
     }
 

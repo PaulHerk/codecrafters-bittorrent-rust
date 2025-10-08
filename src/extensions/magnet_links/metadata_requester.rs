@@ -1,22 +1,25 @@
+/// This is all for the peer itself
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use crate::extensions::{ExtensionAction, ExtensionHandler, ExtensionMessage};
+use crate::extensions::{
+    ExtensionAction, ExtensionHandler, ExtensionMessage, handshake::AdditionalHandshakeInfo,
+};
 
 #[derive(Debug)]
 pub(crate) struct MetadataRequester;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub(super) struct MetadataMsg {
-    msg_type: MetadataMsgType,
+    pub(super) msg_type: MetadataMsgType,
     #[serde(rename = "piece")]
-    piece_index: u32,
-    total_size: Option<u32>,
+    pub(super) piece_index: u32,
+    pub(super) total_size: Option<u32>,
 }
 
 #[derive(Debug, PartialEq, Deserialize_repr, Serialize_repr)]
 #[repr(u8)]
-enum MetadataMsgType {
+pub(super) enum MetadataMsgType {
     Request = 0,
     Data = 1,
     Reject = 2,
@@ -47,8 +50,19 @@ impl ExtensionHandler for MetadataRequester {
         })
     }
 
-    fn on_handshake(&self) -> ExtensionAction {
-        ExtensionAction::SendPeerManager(ExtensionMessage::NeedMetadataPiece)
+    fn on_handshake(&self, additional_info: &AdditionalHandshakeInfo) -> ExtensionAction {
+        let Some(length) = additional_info.metadata_size else {
+            return ExtensionAction::SendPeerManager(ExtensionMessage::NeedMetadataPiece);
+        };
+        let requests = vec![
+            ExtensionAction::SendPeerManager(ExtensionMessage::GotMetadataLength(length)),
+            ExtensionAction::SendPeerManager(ExtensionMessage::NeedMetadataPiece),
+        ];
+        ExtensionAction::Multiple(requests)
+    }
+
+    fn get_ext_type(&self) -> crate::extensions::ExtensionType {
+        crate::extensions::ExtensionType::Metadata
     }
 }
 

@@ -1,4 +1,4 @@
-use std::{io, path::PathBuf};
+use std::{error::Error, io, path::PathBuf};
 
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
@@ -36,4 +36,6 @@ pub enum PeerManagerError {
     WritingToFile(#[from] io::Error),
     #[error("No file name provided")]
     NoFileName,
+    #[error("Some other error occured: `{0}`")]
+    Other(Box<dyn Error + Send + Sync>),
 }

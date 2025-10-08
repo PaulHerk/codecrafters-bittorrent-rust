@@ -3,7 +3,11 @@ use std::{collections::HashMap, mem};
 use futures_util::StreamExt;
 
 use crate::{
-    extensions::{ExtensionType, factory::ExtensionFactory, handshake::HandshakeExtension},
+    extensions::{
+        BasicExtensionPayload, ExtensionType, factory::ExtensionFactory,
+        handshake::HandshakeExtension,
+    },
+    magnet_links::metadata_requester::MetadataRequester,
     messages::{
         PeerMessage,
         payloads::{HavePayload, NoPayload},
@@ -60,6 +64,25 @@ impl Peer {
                             // later TODO: implement lazy bitfield?
                             if !bitfield.is_nothing() {
                                 self.send_peer(PeerMessage::Bitfield(bitfield)).await?;
+                            }
+                        }
+                        ResMessage::ExtensionData((ext_type, data)) => {
+                            let msg = {
+                                let extensions = self.state.0.extensions.lock().unwrap();
+                                if let Some(extensions) = extensions.as_ref()
+                                    && let Some((extension_id, _)) =
+                                        extensions.iter().find(|d| d.1.get_ext_type() == ext_type)
+                                {
+                                    Some(PeerMessage::Extended(BasicExtensionPayload {
+                                        extension_id: *extension_id,
+                                        data,
+                                    }))
+                                } else {
+                                    None
+                                }
+                            };
+                            if let Some(msg) = msg {
+                                self.send_peer(msg).await?;
                             }
                         }
                     },

@@ -125,7 +125,7 @@ mod test_magnetlink {
             ])
         );
         assert_eq!(
-            dbg!(magnet_link.announce),
+            magnet_link.announce,
             Some(
                 url::Url::parse("http://bittorrent-test-tracker.codecrafters.io/announce")
                     .expect("is valid")

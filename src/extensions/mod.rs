@@ -1,7 +1,11 @@
 use bytes::BufMut;
 use serde::{Deserialize, Serialize};
+use strum::{Display, EnumString};
 
-use crate::messages::{PeerMessage, payloads::Payload};
+use crate::{
+    extensions::handshake::AdditionalHandshakeInfo,
+    messages::{PeerMessage, payloads::Payload},
+};
 pub(crate) mod factory;
 pub(crate) mod handshake;
 pub mod magnet_links;
@@ -31,12 +35,14 @@ impl Payload for BasicExtensionPayload {
 }
 
 /// Represents an action that the Peer should take after an extension message is handled.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ExtensionAction {
     /// Send a message back to the remote peer.
     SendPeer(PeerMessage),
     /// Send a request to the PeerManager.
     SendPeerManager(ExtensionMessage),
+    /// Multiple actions
+    Multiple(Vec<ExtensionAction>),
     /// Do nothing.
     Nothing,
 }
@@ -46,6 +52,7 @@ pub enum ExtensionAction {
 pub enum ExtensionMessage {
     NeedMetadataPiece,
     ReceivedMetadataPiece { piece_index: u32, data: Vec<u8> },
+    GotMetadataLength(usize),
 }
 
 /// The core trait for handling extension-specific logic.
@@ -57,13 +64,16 @@ pub trait ExtensionHandler: Send + Sync + std::fmt::Debug {
     /// Called periodically or on specific events (like the initial handshake).
     /// This allows the extension to proactively send messages.
     /// For example, the metadata extension could use this to start requesting pieces.
-    fn on_handshake(&self) -> ExtensionAction;
+    fn on_handshake(&self, additional_info: &AdditionalHandshakeInfo) -> ExtensionAction;
+
+    fn get_ext_type(&self) -> ExtensionType;
 }
 
 /// Enum that represents the currently supportet Extensions
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
-pub(crate) enum ExtensionType {
+#[derive(Debug, Display, EnumString, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
+pub enum ExtensionType {
     Handshake,
+    #[strum(to_string = "ut_metadata")]
     Metadata,
 }
 

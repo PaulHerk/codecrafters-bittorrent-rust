@@ -1,50 +1,46 @@
-use std::{collections::HashMap, default};
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteArray;
 
-use crate::extensions::ExtensionType;
-
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
 #[serde(untagged)]
 pub enum YourIp {
+    /// If this peer has an IPv4 interface, this is the compact representation of that address.
     V4(ByteArray<4>),
+    /// If this peer has an IPv6 interface, this is the compact representation of that address.
     V6(ByteArray<16>),
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct HandshakeExtension {
-    pub m: HashMap<String, u8>,
+pub(crate) struct HandshakeExtension {
+    pub(crate) m: HashMap<String, u8>,
     #[serde(flatten)]
-    other: Other,
+    pub(crate) other: AdditionalHandshakeInfo,
 }
 
-#[derive(Debug, Deserialize, Serialize, Default)]
-struct Other {
-    metadata_size: Option<usize>,
+#[derive(Debug, Deserialize, Serialize, Default, Clone)]
+pub(crate) struct AdditionalHandshakeInfo {
+    pub(crate) metadata_size: Option<usize>,
     /// Local TCP listen port.
-    p: Option<u16>,
+    pub(crate) p: Option<u16>,
     /// Client name and version (as a utf-8 string).
-    v: Option<String>,
+    pub(crate) v: Option<String>,
     /// A string containing the compact representation of the ip address this peer sees you
-    yourip: Option<YourIp>,
-    // /// If this peer has an IPv6 interface, this is the compact representation of that address.
-    // ipv6: Option<[u8; 16]>,
-    // /// If this peer has an IPv4 interface, this is the compact representation of that address.
-    // ipv4: Option<[u8; 4]>,
-    // /// An integer, the number of outstanding request messages this client supports without dropping any.
-    // reqq: Option<u8>,
+    pub(crate) yourip: Option<YourIp>,
+    /// An integer, the number of outstanding request messages this client supports without dropping any.
+    pub(crate) reqq: Option<u8>,
 }
 
 impl HandshakeExtension {
     pub fn new() -> Self {
         let mut m = HashMap::new();
         for &ext in crate::extensions::ACTIVE_EXTENSIONS {
-            m.insert(format!("{ext:?}"), ext as u8);
+            m.insert(ext.to_string(), ext as u8);
         }
-        Self {
+        dbg!(Self {
             m,
-            other: Other::default(),
-        }
+            other: AdditionalHandshakeInfo::default(),
+        })
     }
 }
