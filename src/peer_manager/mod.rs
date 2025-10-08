@@ -316,7 +316,7 @@ impl PeerManager {
                                 }
                             }
                             ExtensionMessage::GotMetadataLength(length) => {
-                                metadata_piece_manager.clear_and_set_len(length);
+                                metadata_piece_manager.set_len(length);
                             }
                         }
                     }

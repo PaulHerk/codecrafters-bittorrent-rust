@@ -29,7 +29,7 @@ pub(crate) struct AdditionalHandshakeInfo {
     /// A string containing the compact representation of the ip address this peer sees you
     pub(crate) yourip: Option<YourIp>,
     /// An integer, the number of outstanding request messages this client supports without dropping any.
-    pub(crate) reqq: Option<u8>,
+    pub(crate) reqq: Option<usize>,
 }
 
 impl HandshakeExtension {

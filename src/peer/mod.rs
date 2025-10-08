@@ -47,7 +47,7 @@ impl Peer {
             .get_msg_type()
             .map(|msg_type| format!("{msg_type:?}"))
             .unwrap_or("KeepAlive".to_string());
-        dbg!(&msg_type_str, &msg);
+        dbg!(&msg_type_str);
         self.peer_writer
             .send(msg)
             .await

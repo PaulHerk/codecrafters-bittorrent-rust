@@ -199,7 +199,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .await?;
 
             tokio::spawn(async move {
-                let _ = peer_manager.run().await;
+                peer_manager.run().await.unwrap();
             });
 
             for &addr in response.peers.0.iter() {

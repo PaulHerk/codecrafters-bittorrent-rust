@@ -49,8 +49,13 @@ impl MetadataPieceManager {
         Ok(Some(serde_bencode::to_bytes(&msg)?))
     }
 
-    /// # This method clears the MetadataPieceManager
-    pub(crate) fn clear_and_set_len(&mut self, length: usize) {
+    /// initializes the fields of the MetadataPieceManager (like which blocks are finished)
+    /// with the given length
+    pub(crate) fn set_len(&mut self, length: usize) {
+        if !self.queue.is_empty() {
+            // it's already initialized
+            return;
+        }
         let n_blocks = length.div_ceil(METADATA_BLOCK_SIZE);
         self.queue = vec![false; n_blocks];
         self.bytes = Cursor::new(Vec::with_capacity(length));

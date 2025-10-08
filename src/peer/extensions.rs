@@ -52,7 +52,7 @@ impl Peer {
     }
 
     async fn handle_action(&mut self, action: ExtensionAction) -> Result<(), PeerError> {
-        match action {
+        match dbg!(action) {
             ExtensionAction::SendPeer(peer_message) => self.send_peer(peer_message).await,
             ExtensionAction::SendPeerManager(extension_message) => {
                 self.send_peer_manager(crate::peer_manager::ReqMessage::Extension(
@@ -77,7 +77,6 @@ fn update_extensions(
 ) -> Result<Vec<ExtensionAction>, PeerError> {
     let handshake = serde_bencode::from_bytes::<HandshakeExtension>(&payload.data)?;
     let mut actions = Vec::new();
-    dbg!(&handshake);
     for (msg_type, msg_id) in handshake.m {
         if msg_id == 0 {
             extensions.remove(&msg_id);
