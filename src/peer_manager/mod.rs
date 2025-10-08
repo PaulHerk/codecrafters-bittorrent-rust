@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs::OpenOptions, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf};
 
 use tokio::sync::mpsc;
 
@@ -12,7 +12,7 @@ use crate::{
     messages::payloads::{BitfieldPayload, RequestPiecePayload, ResponsePiecePayload},
     peer::conn::PeerState,
     peer_manager::{error::PeerManagerError, piece_manager::PieceManager},
-    torrent::{InfoHash, Metainfo},
+    torrent::Metainfo,
 };
 
 pub mod error;
@@ -30,7 +30,7 @@ pub struct PeerManager {
 }
 
 enum TorrentState {
-    // We are waiting for metadata. We only have the info_hash and peers.
+    // We are waiting for metadata.
     WaitingForMetadata {
         file_path: Option<PathBuf>,
         metadata_piece_manager: MetadataPieceManager, // A helper to track downloaded metadata pieces
@@ -45,6 +45,24 @@ enum TorrentState {
         metainfo: Metainfo,
         // ... state relevant to seeding
     },
+}
+
+impl TorrentState {
+    async fn from_info(
+        db_conn: DBConnection,
+        file_path: Option<PathBuf>,
+        metainfo: Metainfo,
+        announce: url::Url,
+    ) -> Result<Self, PeerManagerError> {
+        let torrent = Torrent {
+            announce,
+            info: metainfo,
+        };
+        Ok(TorrentState::Downloading {
+            piece_manager: PieceManager::new(db_conn, file_path, &torrent).await?,
+            metainfo: torrent.info,
+        })
+    }
 }
 
 /// A message sent by a local peer to this Manager
@@ -140,7 +158,18 @@ impl PeerManager {
     ) -> Result<Self, PeerManagerError> {
         let db_conn = DBConnection::new(magnet_link.info_hash).await?;
         if let Some(file_entry) = db_conn.get_entry().await? {
-            todo!("return Ok(Self {{...}})")
+            return Ok(Self {
+                torrent_state: TorrentState::from_info(
+                    db_conn,
+                    Some(file_entry.file.to_path_buf()),
+                    file_entry.torrent_info,
+                    file_entry.announce.clone(),
+                )
+                .await?,
+                rx,
+                announce_url: file_entry.announce,
+                peers: HashMap::new(),
+            });
         } else {
             let torrent_state = TorrentState::WaitingForMetadata {
                 file_path,
@@ -161,10 +190,10 @@ impl PeerManager {
         torrent: Torrent,
     ) -> Result<Self, PeerManagerError> {
         let info_hash = torrent.info.info_hash();
-        let torrent_state = TorrentState::Downloading {
-            metainfo: torrent.info.clone(),
-            piece_manager: PieceManager::new(info_hash, file_path, &torrent).await?,
-        };
+        let db_conn = DBConnection::new(info_hash).await?;
+        let torrent_state =
+            TorrentState::from_info(db_conn, file_path, torrent.info, torrent.announce.clone())
+                .await?;
 
         Ok(Self {
             torrent_state,
@@ -275,7 +304,7 @@ impl PeerManager {
                                         info: metainfo,
                                     };
                                     let piece_manager = PieceManager::new(
-                                        metadata_piece_manager.info_hash,
+                                        DBConnection::new(metadata_piece_manager.info_hash).await?,
                                         file_path.clone(),
                                         &torrent,
                                     )

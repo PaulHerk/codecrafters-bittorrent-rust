@@ -1,9 +1,6 @@
 use std::str::FromStr;
 
-use crate::{
-    extensions::{ExtensionType, handshake::AdditionalHandshakeInfo},
-    magnet_links::metadata_requester::MetadataRequester,
-};
+use crate::{extensions::ExtensionType, magnet_links::metadata_requester::MetadataRequester};
 
 use super::ExtensionHandler;
 

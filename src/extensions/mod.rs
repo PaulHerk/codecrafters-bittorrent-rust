@@ -1,5 +1,4 @@
 use bytes::BufMut;
-use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString};
 
 use crate::{

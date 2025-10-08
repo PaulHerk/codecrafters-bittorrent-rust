@@ -1,4 +1,3 @@
-use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 

@@ -1,13 +1,8 @@
-use std::{collections::HashMap, mem};
-
 use futures_util::StreamExt;
+use std::mem;
 
 use crate::{
-    extensions::{
-        BasicExtensionPayload, ExtensionType, factory::ExtensionFactory,
-        handshake::HandshakeExtension,
-    },
-    magnet_links::metadata_requester::MetadataRequester,
+    extensions::BasicExtensionPayload,
     messages::{
         PeerMessage,
         payloads::{HavePayload, NoPayload},

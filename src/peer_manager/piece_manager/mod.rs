@@ -7,7 +7,6 @@ use crate::{
     Torrent,
     database::DBConnection,
     peer_manager::{MAX_PIECES_IN_PARALLEL, PieceState, error::PeerManagerError},
-    torrent::InfoHash,
 };
 mod file_manager;
 mod req_preparer;
@@ -25,11 +24,10 @@ pub(super) struct PieceManager {
 
 impl PieceManager {
     pub(super) async fn new(
-        info_hash: InfoHash,
+        db_conn: DBConnection,
         file_path: Option<PathBuf>,
         torrent: &Torrent,
     ) -> Result<Self, PeerManagerError> {
-        let db_conn = DBConnection::new(info_hash).await?;
         let file_path = file_path.unwrap_or(torrent.info.name.clone().into());
         let file_entry = db_conn.get_entry().await?;
         let file_existed = file_entry.is_some();
@@ -50,7 +48,7 @@ impl PieceManager {
             })?;
 
         let download_queue = if file_entry.is_finished() {
-            todo!("seeding state")
+            todo!("We are finished and now seeding which isn't implemented yet.")
         } else {
             Vec::with_capacity(MAX_PIECES_IN_PARALLEL)
         };

@@ -1,12 +1,9 @@
-use std::{error::Error, net::SocketAddrV4, os::unix::net::SocketAddr};
+use std::net::SocketAddrV4;
 
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::{
-    database::DBError, peer_manager::error::PeerManagerError, torrent::InfoHash,
-    tracker::TrackerRequestError,
-};
+use crate::torrent::InfoHash;
 
 // mod before_download_manager;
 // mod peer_manager_init;
