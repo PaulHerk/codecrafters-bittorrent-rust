@@ -296,9 +296,8 @@ impl PeerManager {
                             ExtensionMessage::ReceivedMetadataPiece { piece_index, data } => {
                                 metadata_piece_manager.add_block(piece_index, data.to_vec())?;
                                 if metadata_piece_manager.check_finished() {
-                                    println!("WE'RE FINISHED");
-
                                     let metainfo = metadata_piece_manager.get_metadata().expect("This shouldn't fail since we checked that the hashes match.");
+                                    dbg!("Finished downloading metainfo", &metainfo);
                                     let torrent = Torrent {
                                         announce: self.announce_url.clone(),
                                         info: metainfo,

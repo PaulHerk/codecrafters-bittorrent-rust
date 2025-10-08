@@ -72,7 +72,7 @@ pub struct MagnetLink {
     #[serde(rename = "dn")]
     file_name: Option<String>,
     #[serde(rename = "tr")]
-    announce: Option<url::Url>,
+    trackers: Option<url::Url>,
     #[serde(rename = "x.pe")]
     peer_addr: Option<SocketAddrV4>,
 }
@@ -83,12 +83,24 @@ impl MagnetLink {
         if url.scheme() != "magnet" {
             return Err(MagnetLinkError::NoMagnetLink);
         }
-        let query = url.query().ok_or(MagnetLinkError::NoQueryFound)?;
+        // TODO: we need to update the deserialialization to use .query_pairs() because Ig serde_urlencoded() doesn't support multiple fields
+        let query = url
+            .as_str()
+            .split_once('?')
+            .ok_or(MagnetLinkError::NoQueryFound)?
+            .1;
         let magnet_link = serde_urlencoded::from_str(query)?;
         Ok(magnet_link)
     }
     pub fn get_announce_url(&self) -> Result<url::Url, MagnetLinkError> {
-        self.announce.clone().ok_or(MagnetLinkError::NoTrackerUrl)
+        let mut url = self.trackers.clone().ok_or(MagnetLinkError::NoTrackerUrl)?;
+        if url.scheme() == "udp" {
+            url.set_path("/announce");
+            let url_str = &url.as_str()[3..];
+            url = url::Url::parse(&format!("http{url_str}")).expect("is valid");
+            // the reason I do this is because I cannot set the scheme via .set_scheme() from udp to http
+        }
+        Ok(url)
     }
 }
 
@@ -112,7 +124,7 @@ mod test_magnetlink {
     #[test]
     fn parse() {
         let magnet_link = MagnetLink::from_url(
-            "magnet:?xt=urn:btih:ad42ce8109f54c99613ce38f9b4d87e70f24a165&dn=magnet1.gif&tr=http%3A%2F%2Fbittorrent-test-tracker.codecrafters.io%2Fannounce",
+            "magnet:?xt=urn:btih:ad42ce8109f54c99613ce38f9b4d87e70f24a165&dn=magnet1.gif&tr=http%3A%2F%2Fbittorrent-test-tracker.codecrafters.io%2Fannounce"
         ).expect("is valid");
         assert_eq!(
             magnet_link.info_hash,
@@ -122,7 +134,7 @@ mod test_magnetlink {
             ])
         );
         assert_eq!(
-            magnet_link.announce,
+            magnet_link.trackers,
             Some(
                 url::Url::parse("http://bittorrent-test-tracker.codecrafters.io/announce")
                     .expect("is valid")
