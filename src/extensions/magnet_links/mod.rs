@@ -36,9 +36,9 @@ mod des_info_hash {
         {
             let starting_str_occ = &v[..INFO_HASH_PREFIX.len()];
             if INFO_HASH_PREFIX != starting_str_occ {
-                return Err(E::custom(format!(
+                Err(E::custom(format!(
                     "invalid prefix, got: {starting_str_occ}, expected: {INFO_HASH_PREFIX}"
-                )));
+                )))
             } else {
                 let hex_hash = &v[INFO_HASH_PREFIX.len() + 1..]; // +1 for the colon
                 let bytes_hash = hex::decode(hex_hash).map_err(|e| {

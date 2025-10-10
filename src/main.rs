@@ -217,7 +217,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     peer.run().await.unwrap();
                 });
             }
-            loop {}
+            std::thread::sleep(std::time::Duration::MAX);
         }
     }
 

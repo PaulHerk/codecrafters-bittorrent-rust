@@ -82,7 +82,7 @@ fn escape_bytes_url(bytes: &[u8; 20]) -> String {
     bytes
         .iter()
         .map(|b| {
-            if b.is_ascii_alphabetic() || b.is_ascii_digit() {
+            if b.is_ascii_alphanumeric() {
                 (*b as char).to_string()
             } else {
                 format!("%{}", hex::encode([*b]))

@@ -158,7 +158,7 @@ impl PeerManager {
     ) -> Result<Self, PeerManagerError> {
         let db_conn = DBConnection::new(magnet_link.info_hash).await?;
         if let Some(file_entry) = db_conn.get_entry().await? {
-            return Ok(Self {
+            Ok(Self {
                 torrent_state: TorrentState::from_info(
                     db_conn,
                     Some(file_entry.file.to_path_buf()),
@@ -169,18 +169,18 @@ impl PeerManager {
                 rx,
                 announce_url: file_entry.announce,
                 peers: HashMap::new(),
-            });
+            })
         } else {
             let torrent_state = TorrentState::WaitingForMetadata {
                 file_path,
                 metadata_piece_manager: MetadataPieceManager::new(magnet_link.info_hash),
             };
-            return Ok(Self {
+            Ok(Self {
                 torrent_state,
                 rx,
                 announce_url: magnet_link.get_announce_url()?,
                 peers: HashMap::new(),
-            });
+            })
         }
     }
 

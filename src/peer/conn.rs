@@ -24,7 +24,7 @@ use crate::messages::{MessageFramer, PeerMessage};
 use crate::peer::Msg;
 use crate::peer::Peer;
 use crate::peer::error::PeerError;
-use crate::peer::handshake::Handshake;
+use crate::peer::initial_handshake::Handshake;
 use crate::peer_manager::PeerConn;
 use crate::peer_manager::ReqMessage;
 use crate::peer_manager::ReqMsgFromPeer;

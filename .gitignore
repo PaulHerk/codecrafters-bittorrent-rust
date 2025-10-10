@@ -11,4 +11,6 @@ target/
 /target
 .shuttle*
 Secrets*.toml
+
 files
+.roo

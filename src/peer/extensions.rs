@@ -5,7 +5,7 @@ use crate::{
     Peer,
     extensions::{
         BasicExtensionPayload, ExtensionAction, ExtensionHandler, ExtensionMessage, ExtensionType,
-        factory::ExtensionFactory, handshake::HandshakeExtension,
+        factory::ExtensionFactory, protocol_extension_handshake::HandshakeExtension,
     },
     messages::PeerMessage,
     peer::error::PeerError,
@@ -33,8 +33,7 @@ impl Peer {
 
             if let Some(extensions) = maybe_extensions {
                 if payload.extension_id == ExtensionType::Handshake as u8 {
-                    let actions = update_extensions(extensions, payload)?;
-                    actions
+                    update_extensions(extensions, payload)?
                 } else if let Some(extension) = extensions.get(&payload.extension_id) {
                     vec![extension.handle_message(&payload.data)]
                 } else {

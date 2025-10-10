@@ -3,7 +3,8 @@ use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
 use crate::extensions::{
-    ExtensionAction, ExtensionHandler, ExtensionMessage, handshake::AdditionalHandshakeInfo,
+    ExtensionAction, ExtensionHandler, ExtensionMessage,
+    protocol_extension_handshake::AdditionalHandshakeInfo,
 };
 
 #[derive(Debug)]

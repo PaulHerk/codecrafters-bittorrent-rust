@@ -2,12 +2,12 @@ use bytes::BufMut;
 use strum::{Display, EnumString};
 
 use crate::{
-    extensions::handshake::AdditionalHandshakeInfo,
+    extensions::protocol_extension_handshake::AdditionalHandshakeInfo,
     messages::{PeerMessage, payloads::Payload},
 };
 pub(crate) mod factory;
-pub(crate) mod handshake;
 pub mod magnet_links;
+pub(crate) mod protocol_extension_handshake;
 
 /// This Payload is merely a holder for the extended message ID and data.
 /// We can build a full ExtensionPayload directly from the peer since we need the HashMap of the extensions

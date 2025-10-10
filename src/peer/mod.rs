@@ -14,7 +14,7 @@ pub mod conn;
 mod error;
 mod event_loop;
 mod extensions;
-pub mod handshake;
+pub mod initial_handshake;
 
 /// this enum is used to select between different stream-types a peer can receive
 #[derive(Debug, PartialEq)]

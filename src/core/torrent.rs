@@ -11,7 +11,7 @@ pub struct InfoHash(pub [u8; 20]);
 mod ser_info_hash {
     use serde::{Serialize, Serializer};
 
-    use crate::torrent::InfoHash;
+    use super::InfoHash;
 
     impl Serialize for InfoHash {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

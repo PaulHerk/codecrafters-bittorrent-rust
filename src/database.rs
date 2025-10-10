@@ -12,9 +12,7 @@ use surrealdb::opt::PatchOp;
 use surrealdb::engine::local::RocksDb;
 use thiserror::Error;
 
-use crate::Torrent;
-use crate::torrent::InfoHash;
-use crate::torrent::Metainfo;
+use crate::torrent::{InfoHash, Metainfo, Torrent};
 
 /// the actual data stored in the DB
 /// torrent path is also the key

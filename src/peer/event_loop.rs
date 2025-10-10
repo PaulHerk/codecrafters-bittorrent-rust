@@ -23,10 +23,10 @@ impl Peer {
         loop {
             if let Some(message) = receiver_stream.next().await {
                 if let Msg::Data(PeerMessage::Piece(_)) = message {
-                } else if let Msg::Data(PeerMessage::Extended(ref p)) = message {
-                    if p.extension_id == 2 {
-                        dbg!(&message);
-                    }
+                } else if let Msg::Data(PeerMessage::Extended(ref p)) = message
+                    && p.extension_id == 2
+                {
+                    dbg!(&message);
                 }
                 match message {
                     Msg::Manager(peer_msg) => match peer_msg {

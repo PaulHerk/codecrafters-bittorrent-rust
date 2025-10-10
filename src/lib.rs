@@ -1,16 +1,17 @@
+pub mod core;
 mod database;
 mod extensions;
 mod messages;
 mod peer;
 mod peer_manager;
-mod torrent;
 mod tracker;
 
+pub use crate::core::torrent::Torrent;
+pub use core::torrent;
 pub use extensions::magnet_links;
 pub use peer::Peer;
 pub use peer_manager::PeerManager;
 use std::collections::HashMap;
-pub use torrent::Torrent;
 pub use tracker::TrackerRequest;
 
 pub(crate) const BLOCK_MAX: u32 = 1 << 14;
