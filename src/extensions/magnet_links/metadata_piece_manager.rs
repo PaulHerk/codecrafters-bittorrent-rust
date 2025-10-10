@@ -46,7 +46,7 @@ impl MetadataPieceManager {
             piece_index: piece_index as u32,
             total_size: None,
         };
-        Ok(Some(serde_bencode::to_bytes(&msg)?))
+        Ok(Some(serde_bencode::to_bytes(&dbg!(msg))?))
     }
 
     /// initializes the fields of the MetadataPieceManager (like which blocks are finished)

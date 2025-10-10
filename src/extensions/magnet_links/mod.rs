@@ -83,7 +83,7 @@ impl MagnetLink {
         if url.scheme() != "magnet" {
             return Err(MagnetLinkError::NoMagnetLink);
         }
-        // TODO: we need to update the deserialialization to use .query_pairs() because Ig serde_urlencoded() doesn't support multiple fields
+        // TODO: we need to update the deserialialization to use .query_pairs() because apparently serde_urlencoded() doesn't support multiple fields
         let query = url
             .as_str()
             .split_once('?')
@@ -94,6 +94,7 @@ impl MagnetLink {
     }
     pub fn get_announce_url(&self) -> Result<url::Url, MagnetLinkError> {
         let mut url = self.trackers.clone().ok_or(MagnetLinkError::NoTrackerUrl)?;
+        // current workaround for some trackers that only announce their udp addr but also have support for http
         if url.scheme() == "udp" {
             url.set_path("/announce");
             let url_str = &url.as_str()[3..];

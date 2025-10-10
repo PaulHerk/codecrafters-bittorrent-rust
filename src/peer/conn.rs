@@ -134,7 +134,7 @@ impl Peer {
 
         Ok(Self {
             state: peer_state,
-            req_queue: Vec::new(),
+            queue: crate::peer::ReqQueue::new(),
             peer_manager_tx,
             peer_writer,
             receiver_stream,

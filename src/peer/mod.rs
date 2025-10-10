@@ -26,11 +26,15 @@ pub enum Msg {
 }
 pub struct Peer {
     pub(crate) state: PeerState,
-    pub(crate) req_queue: Vec<RequestPiecePayload>,
+    queue: ReqQueue,
     peer_manager_tx: mpsc::Sender<ReqMsgFromPeer>,
     peer_writer: PeerWriter,
     // this is an Option because the event-loop takes the Stream and leaves a None in its place while running
     receiver_stream: Option<BoxedMsgStream>,
+}
+struct ReqQueue {
+    to_send: Vec<PeerMessage>,
+    have_sent: usize,
 }
 
 impl Peer {
@@ -86,5 +90,14 @@ impl Peer {
         }
 
         self.peer_writer.close().await.is_ok()
+    }
+}
+
+impl ReqQueue {
+    fn new() -> Self {
+        ReqQueue {
+            to_send: Vec::new(),
+            have_sent: 0,
+        }
     }
 }

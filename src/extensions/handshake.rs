@@ -38,9 +38,9 @@ impl HandshakeExtension {
         for &ext in crate::extensions::ACTIVE_EXTENSIONS {
             m.insert(ext.to_string(), ext as u8);
         }
-        dbg!(Self {
+        Self {
             m,
             other: AdditionalHandshakeInfo::default(),
-        })
+        }
     }
 }

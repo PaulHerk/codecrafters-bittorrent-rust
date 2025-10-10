@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use crate::{
     Peer,
     extensions::{
-        BasicExtensionPayload, ExtensionAction, ExtensionHandler, ExtensionType,
+        BasicExtensionPayload, ExtensionAction, ExtensionHandler, ExtensionMessage, ExtensionType,
         factory::ExtensionFactory, handshake::HandshakeExtension,
     },
     messages::PeerMessage,
@@ -52,9 +52,17 @@ impl Peer {
     }
 
     async fn handle_action(&mut self, action: ExtensionAction) -> Result<(), PeerError> {
-        match dbg!(action) {
+        match action {
             ExtensionAction::SendPeer(peer_message) => self.send_peer(peer_message).await,
             ExtensionAction::SendPeerManager(extension_message) => {
+                if let ExtensionMessage::ReceivedMetadataPiece {
+                    piece_index: _,
+                    data: _,
+                } = extension_message
+                {
+                    self.queue.have_sent -= 1;
+                }
+
                 self.send_peer_manager(crate::peer_manager::ReqMessage::Extension(
                     extension_message,
                 ))
@@ -76,6 +84,7 @@ fn update_extensions(
     payload: BasicExtensionPayload,
 ) -> Result<Vec<ExtensionAction>, PeerError> {
     let handshake = serde_bencode::from_bytes::<HandshakeExtension>(&payload.data)?;
+    dbg!(&handshake);
     let mut actions = Vec::new();
     for (msg_type, msg_id) in handshake.m {
         if msg_id == 0 {

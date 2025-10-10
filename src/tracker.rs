@@ -65,13 +65,14 @@ impl<'a> TrackerRequest<'a> {
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:142.0) Gecko/20100101 Firefox/142.0",
         )
         .build()?;
-        let response = client.get(announce_url).send().await?;
+        let response = client.get(announce_url.clone()).send().await?;
         let response_bytes = response.bytes().await?;
 
         serde_bencode::from_bytes::<TrackerResponse>(&response_bytes).map_err(|des_err| {
             TrackerRequestError::InvalidResponse {
                 error: des_err,
                 response: response_bytes,
+                url: announce_url.as_str().to_string(),
             }
         })
     }
@@ -199,6 +200,7 @@ pub enum TrackerRequestError {
     InvalidResponse {
         error: serde_bencode::Error,
         response: bytes::Bytes,
+        url: String,
     },
     #[error("Something failed with requesting the tracker-response: `{0}`")]
     ReqwestError(#[from] reqwest::Error),
