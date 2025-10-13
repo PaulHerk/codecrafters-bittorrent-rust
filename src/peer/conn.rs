@@ -19,7 +19,6 @@ use tokio_util::codec::Framed;
 use tokio_util::time::FutureExt;
 
 use crate::extensions::ExtensionHandler;
-use crate::extensions::ExtensionType;
 use crate::messages::{MessageFramer, PeerMessage};
 use crate::peer::Msg;
 use crate::peer::Peer;
@@ -30,69 +29,6 @@ use crate::peer_manager::ReqMessage;
 use crate::peer_manager::ReqMsgFromPeer;
 use crate::peer_manager::ResMessage;
 use crate::torrent::InfoHash;
-
-/// this is just a wrapper type for the actual states that wraps it in an Arc
-#[derive(Debug, Clone)]
-pub(crate) struct PeerState(pub(crate) Arc<PeerStateInner>);
-
-#[derive(Debug)]
-pub(crate) struct PeerStateInner {
-    /// the peer_id of the remote peer
-    pub(crate) peer_id: [u8; 20],
-    // dk if I need this at all
-    // pub state: Arc<Mutex<super::PeerState>>,
-    pub(crate) am_choking: Mutex<bool>,
-    pub(crate) am_interested: Mutex<bool>,
-    pub(crate) peer_choking: Mutex<bool>,
-    pub(crate) peer_interested: Mutex<bool>,
-    /// the bitfield of the other peer
-    pub(crate) has: Mutex<Vec<bool>>,
-    /// maps extended message ID to names of extensions
-    pub(crate) extensions: Mutex<Option<HashMap<u8, Box<dyn ExtensionHandler>>>>,
-}
-
-impl PeerState {
-    pub(crate) fn new(handshake: Handshake) -> Self {
-        let extensions = if handshake.has_extensions_enabled() {
-            Some(HashMap::new())
-        } else {
-            None
-        };
-        let peer_identifier_inner = PeerStateInner {
-            peer_id: handshake.peer_id,
-            am_choking: Mutex::new(true),
-            am_interested: Mutex::new(false),
-            peer_choking: Mutex::new(true),
-            peer_interested: Mutex::new(false),
-            has: Mutex::new(Vec::new()),
-            extensions: Mutex::new(extensions),
-        };
-        Self(Arc::new(peer_identifier_inner))
-    }
-
-    async fn connect_to_peer_manager(
-        &self,
-        peer_manager_tx: &Sender<ReqMsgFromPeer>,
-    ) -> Result<Receiver<ResMessage>, PeerError> {
-        let (sender, peer_manager_rx) = mpsc::channel(16);
-        let peer_conn = PeerConn {
-            sender,
-            identifier: self.clone(),
-        };
-        let peer_id = self.0.peer_id;
-        let msg = ReqMsgFromPeer {
-            peer_id,
-            msg: ReqMessage::NewConnection(peer_conn),
-        };
-        send_peer_manager(peer_manager_tx, msg, peer_id).await?;
-
-        Ok(peer_manager_rx)
-    }
-}
-
-pub(super) type BoxedMsgStream = Pin<Box<dyn Stream<Item = Msg> + Send + Sync>>;
-pub(super) type PeerWriter = SplitSink<Framed<TcpStream, MessageFramer>, PeerMessage>;
-type PeerReader = SplitStream<Framed<TcpStream, MessageFramer>>;
 
 impl Peer {
     pub async fn connect_from_addr(
@@ -185,3 +121,66 @@ pub(super) async fn send_peer_manager(
             msg_type,
         })
 }
+
+/// this is just a wrapper type for the actual states that wraps it in an Arc
+#[derive(Debug, Clone)]
+pub(crate) struct PeerState(pub(crate) Arc<PeerStateInner>);
+
+#[derive(Debug)]
+pub(crate) struct PeerStateInner {
+    /// the peer_id of the remote peer
+    pub(crate) peer_id: [u8; 20],
+    // dk if I need this at all
+    // pub state: Arc<Mutex<super::PeerState>>,
+    pub(crate) am_choking: Mutex<bool>,
+    pub(crate) am_interested: Mutex<bool>,
+    pub(crate) peer_choking: Mutex<bool>,
+    pub(crate) peer_interested: Mutex<bool>,
+    /// the bitfield of the other peer
+    pub(crate) has: Mutex<Vec<bool>>,
+    /// maps extended message ID to names of extensions
+    pub(crate) extensions: Mutex<Option<HashMap<u8, Box<dyn ExtensionHandler>>>>,
+}
+
+impl PeerState {
+    pub(crate) fn new(handshake: Handshake) -> Self {
+        let extensions = if handshake.has_extensions_enabled() {
+            Some(HashMap::new())
+        } else {
+            None
+        };
+        let peer_identifier_inner = PeerStateInner {
+            peer_id: handshake.peer_id,
+            am_choking: Mutex::new(true),
+            am_interested: Mutex::new(false),
+            peer_choking: Mutex::new(true),
+            peer_interested: Mutex::new(false),
+            has: Mutex::new(Vec::new()),
+            extensions: Mutex::new(extensions),
+        };
+        Self(Arc::new(peer_identifier_inner))
+    }
+
+    async fn connect_to_peer_manager(
+        &self,
+        peer_manager_tx: &Sender<ReqMsgFromPeer>,
+    ) -> Result<Receiver<ResMessage>, PeerError> {
+        let (sender, peer_manager_rx) = mpsc::channel(16);
+        let peer_conn = PeerConn {
+            sender,
+            identifier: self.clone(),
+        };
+        let peer_id = self.0.peer_id;
+        let msg = ReqMsgFromPeer {
+            peer_id,
+            msg: ReqMessage::NewConnection(peer_conn),
+        };
+        send_peer_manager(peer_manager_tx, msg, peer_id).await?;
+
+        Ok(peer_manager_rx)
+    }
+}
+
+pub(super) type BoxedMsgStream = Pin<Box<dyn Stream<Item = Msg> + Send + Sync>>;
+pub(super) type PeerWriter = SplitSink<Framed<TcpStream, MessageFramer>, PeerMessage>;
+type PeerReader = SplitStream<Framed<TcpStream, MessageFramer>>;

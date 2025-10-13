@@ -3,7 +3,6 @@ use tokio::sync::mpsc;
 
 use crate::messages::PeerMessage;
 use crate::messages::payloads::NoPayload;
-use crate::messages::payloads::RequestPiecePayload;
 use crate::peer::conn::PeerWriter;
 use crate::peer::conn::send_peer_manager;
 use crate::peer::conn::{BoxedMsgStream, PeerState};

@@ -6,7 +6,9 @@ use super::PieceState;
 use crate::{
     BLOCK_MAX,
     messages::payloads::{RequestPiecePayload, ResponsePiecePayload},
-    peer_manager::{BlockState, PieceManager, error::PeerManagerError},
+    peer_manager::{
+        BlockState, PieceManager, error::PeerManagerError, piece_manager::DownloadQueue,
+    },
     torrent::Metainfo,
 };
 
@@ -19,25 +21,8 @@ impl PieceManager {
         block: ResponsePiecePayload,
         metainfo: &Metainfo,
     ) -> Result<Option<u32>, PeerManagerError> {
-        let Some((queue_i, piece_state)) = self
-            .download_queue
-            .iter_mut()
-            .enumerate()
-            .find(|(_i, s)| s.piece_i == block.index)
-        else {
-            // if the piece isn't even something we want we ignore it
-            // TODO: we might aswell add a new PieceState to the download_queue if it's not full yet
-            // self.add_piece_to_queue();
-            // recursion not really ideal
-            return Ok(None);
-        };
-
-        piece_state.update_state(block);
-        if piece_state.blocks.iter().all(|b| b.is_finished()) {
-            // we're done with this piece
-            let piece_state = self.download_queue.remove(queue_i);
+        if let Some(piece_state) = self.download_queue.update_piece_state(block) {
             self.handle_piece(&piece_state, metainfo).await?;
-
             Ok(Some(piece_state.piece_i))
         } else {
             Ok(None)
@@ -53,8 +38,6 @@ impl PieceManager {
     ) -> Result<(), PeerManagerError> {
         let hashs_match = piece_state.check_hash(metainfo);
         if !hashs_match {
-            self.download_queue
-                .retain(|p| p.piece_i != piece_state.piece_i);
             return Ok(());
         }
         self.write_piece_to_file(piece_state, metainfo).await?;
@@ -106,6 +89,30 @@ impl PieceManager {
 
     pub(in crate::peer_manager) fn is_finished(&self) -> bool {
         self.have.iter().all(|b| *b)
+    }
+}
+
+impl DownloadQueue {
+    /// function that updates the PieceState in the queue in response to a payload
+    /// also if we're done with the piece, it gets removed and returned from the queue
+    fn update_piece_state(&mut self, block: ResponsePiecePayload) -> Option<PieceState> {
+        let (queue_i, piece_state) = self
+            .0
+            .iter_mut()
+            .enumerate()
+            .find(|(_i, s)| s.piece_i == block.index)?;
+        // if the piece isn't even something we want we ignore it
+        // TODO: we might aswell add a new PieceState to the download_queue if it's not full yet
+        // self.add_piece_to_queue();
+        // recursion not really ideal
+
+        piece_state.update_state(block);
+        if piece_state.blocks.iter().all(|b| b.is_finished()) {
+            // we're done with this piece
+            Some(self.0.swap_remove(queue_i))
+        } else {
+            None
+        }
     }
 }
 

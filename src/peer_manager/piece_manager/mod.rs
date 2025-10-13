@@ -6,20 +6,23 @@ use std::{
 use crate::{
     Torrent,
     database::DBConnection,
-    peer_manager::{MAX_PIECES_IN_PARALLEL, PieceState, error::PeerManagerError},
+    peer_manager::{
+        PieceState, error::PeerManagerError, piece_manager::req_preparer::DownloadQueue,
+    },
 };
 mod file_manager;
 mod req_preparer;
 
+#[derive(Debug)]
 pub(super) struct PieceManager {
     /// I need this information too often to always query the DB
     /// so let's cache it
-    pub(crate) have: Vec<bool>,
+    pub(super) have: Vec<bool>,
     /// if it's None, we are finished
-    pub(crate) download_queue: Vec<PieceState>,
-    pub(crate) db_conn: DBConnection,
+    download_queue: DownloadQueue,
+    db_conn: DBConnection,
     /// the output file
-    pub(crate) file: File,
+    file: File,
 }
 
 impl PieceManager {
@@ -50,7 +53,7 @@ impl PieceManager {
         let download_queue = if file_entry.is_finished() {
             todo!("We are finished and now seeding which isn't implemented yet.")
         } else {
-            Vec::with_capacity(MAX_PIECES_IN_PARALLEL)
+            DownloadQueue::new()
         };
 
         Ok(PieceManager {

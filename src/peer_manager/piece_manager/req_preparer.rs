@@ -1,4 +1,4 @@
-use rand::seq::IndexedRandom;
+use rand::seq::{IndexedRandom, IteratorRandom};
 
 use crate::{
     BLOCK_MAX,
@@ -7,16 +7,22 @@ use crate::{
     torrent::Metainfo,
 };
 
-impl PieceManager {
-    /// returns a list of blocks that we want to request
-    pub(in crate::peer_manager) fn prepare_next_blocks(
+#[derive(Debug)]
+pub(super) struct DownloadQueue(pub(in crate::peer_manager::piece_manager) Vec<PieceState>);
+
+impl DownloadQueue {
+    pub(super) fn new() -> Self {
+        Self(Vec::with_capacity(MAX_PIECES_IN_PARALLEL))
+    }
+
+    fn get_queue_for_peer(
         &mut self,
-        n: usize,
-        peer_has: Vec<bool>,
+        i_have: &[bool],
+        peer_has: &[bool],
         metainfo: &Metainfo,
-    ) -> Vec<RequestPiecePayload> {
+    ) -> Option<&mut PieceState> {
         // 1. Try if we have something in the download queue
-        let piece_i = self.download_queue.iter().position(|state| {
+        let piece_i = self.0.iter().position(|state| {
             let peer_has_it = peer_has[state.piece_i as usize];
             let blocks_we_need = state.blocks.iter().filter(|b| b.is_none());
             // TODO: now currently if there's only one block remaining in the queue, it will return only that one
@@ -25,18 +31,62 @@ impl PieceManager {
         });
 
         // 2. If not, add something to the queue: realistically rarest-first
-        if piece_i.is_none() && !self.add_piece_to_queue(&peer_has, metainfo) {
-            return Vec::new();
+        if piece_i.is_none() && !self.add_piece_to_queue(i_have, peer_has, metainfo) {
+            return None;
         }
 
-        let piece_i = piece_i.unwrap_or_else(|| self.download_queue.len() - 1);
+        let piece_i = piece_i.unwrap_or_else(|| self.0.len() - 1);
         // the download_queue will have a last piece, because it may have been added by self.add_piece_to_queue. If it hasn't, we have returned.
-        let piece = self
-            .download_queue
-            .get_mut(piece_i)
-            .expect("we checked that before");
+        Some(self.0.get_mut(piece_i).expect("we checked that before"))
+    }
 
-        // 3. Actually create the responses
+    /// checks whether the queue is full, if not adds a new item
+    /// returns whether a new piece is added (true) or not (false)
+    pub(in crate::peer_manager) fn add_piece_to_queue(
+        &mut self,
+        i_have: &[bool],
+        peer_has: &[bool],
+        metainfo: &Metainfo,
+    ) -> bool {
+        // if the queue is already to big but we're at the last piece, we still want to add it
+        if self.0.len() == MAX_PIECES_IN_PARALLEL && i_have.iter().filter(|b| **b).count() > 1 {
+            return false;
+        }
+
+        let Some(piece_i)= i_have
+            .iter()
+            .zip(peer_has)
+            .enumerate()
+            .filter_map(|(index, (i_have, p_has))| {
+                if !*i_have && *p_has /* Now theoretically we would check if the piece is already in the queue aswell but since we checked that before calling this function I don't do it here again */{
+                    Some(index as u32)
+                } else {
+                    None
+                }
+            }).choose(&mut rand::rng()) else { return false };
+
+        let piece_state = PieceState::new(metainfo, piece_i);
+        self.0.push(piece_state);
+
+        true
+    }
+}
+
+impl PieceManager {
+    /// returns a list of blocks that we want to request
+    pub(in crate::peer_manager) fn prepare_next_blocks(
+        &mut self,
+        n: usize,
+        peer_has: &[bool],
+        metainfo: &Metainfo,
+    ) -> Vec<RequestPiecePayload> {
+        let Some(piece) = self
+            .download_queue
+            .get_queue_for_peer(&self.have, peer_has, metainfo)
+        else {
+            return vec![];
+        };
+
         let mut requests = Vec::with_capacity(n);
         let n_blocks = piece.blocks.capacity() as u32;
         let piece_size = piece.buf.capacity() as u32;
@@ -59,50 +109,6 @@ impl PieceManager {
         }
 
         requests
-    }
-
-    /// checks whether the queue is full, if not adds a new item
-    /// returns whether a new piece is added (true) or not (false)
-    pub(in crate::peer_manager) fn add_piece_to_queue(
-        &mut self,
-        peer_has: &Vec<bool>,
-        metainfo: &Metainfo,
-    ) -> bool {
-        // if the queue is already to big but we're at the last piece, we still want to add it
-        if self.download_queue.len() == MAX_PIECES_IN_PARALLEL
-            && self.have.iter().filter(|b| **b).count() > 1
-        {
-            return false;
-        }
-
-        let possible_pieces: Vec<u32> = self
-            .have
-            .iter()
-            .zip(peer_has)
-            .enumerate()
-            .filter_map(|(index, (i_have, p_has))| {
-                if !*i_have
-                    && *p_has
-                    && !self
-                        .download_queue
-                        .iter()
-                        .any(|s| s.piece_i == index as u32)
-                {
-                    Some(index as u32)
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        let Some(piece_i) = possible_pieces.choose(&mut rand::rng()) else {
-            return false;
-        };
-
-        let piece_state = PieceState::new(metainfo, *piece_i);
-        self.download_queue.push(piece_state);
-
-        true
     }
 }
 

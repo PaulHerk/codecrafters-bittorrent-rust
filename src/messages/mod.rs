@@ -1,7 +1,7 @@
 use bytes::BufMut;
 use bytes::{Buf, BytesMut};
 use payloads::*;
-use serde_repr::Deserialize_repr;
+use strum::{AsRefStr, FromRepr};
 use tokio_util::codec::Decoder;
 use tokio_util::codec::Encoder;
 
@@ -10,7 +10,7 @@ use crate::extensions::BasicExtensionPayload;
 pub(crate) mod client_identifier;
 pub(crate) mod payloads;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, AsRefStr)]
 pub enum PeerMessage {
     Choke(NoPayload),
     Unchoke(NoPayload),
@@ -59,7 +59,7 @@ impl PeerMessage {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize_repr)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr)]
 #[repr(u8)]
 pub enum MessageType {
     Choke = 0,
@@ -134,35 +134,30 @@ impl Decoder for MessageFramer {
         };
         let msg_type = src[4];
 
-        let payload = match serde_json::from_str::<MessageType>(&msg_type.to_string()) {
-            Ok(MessageType::Choke) => Ok::<_, std::io::Error>(PeerMessage::Choke(NoPayload)),
-            Ok(MessageType::Unchoke) => Ok(PeerMessage::Unchoke(NoPayload)),
-            Ok(MessageType::Interested) => Ok(PeerMessage::Interested(NoPayload)),
-            Ok(MessageType::NotInterested) => Ok(PeerMessage::NotInterested(NoPayload)),
-            Ok(MessageType::Have) => Ok(PeerMessage::Have(HavePayload::from_be_bytes(data))),
-            Ok(MessageType::Bitfield) => {
+        let payload = match MessageType::from_repr(msg_type) {
+            Some(MessageType::Choke) => Ok::<_, std::io::Error>(PeerMessage::Choke(NoPayload)),
+            Some(MessageType::Unchoke) => Ok(PeerMessage::Unchoke(NoPayload)),
+            Some(MessageType::Interested) => Ok(PeerMessage::Interested(NoPayload)),
+            Some(MessageType::NotInterested) => Ok(PeerMessage::NotInterested(NoPayload)),
+            Some(MessageType::Have) => Ok(PeerMessage::Have(HavePayload::from_be_bytes(data))),
+            Some(MessageType::Bitfield) => {
                 Ok(PeerMessage::Bitfield(BitfieldPayload::from_be_bytes(data)))
             }
-            Ok(MessageType::Request) => Ok(PeerMessage::Request(
+            Some(MessageType::Request) => Ok(PeerMessage::Request(
                 RequestPiecePayload::from_be_bytes(data),
             )),
-            Ok(MessageType::Piece) => Ok(PeerMessage::Piece(ResponsePiecePayload::from_be_bytes(
-                data,
-            ))),
-            Ok(MessageType::Cancel) => Ok(PeerMessage::Cancel(RequestPiecePayload::from_be_bytes(
-                data,
-            ))),
-            Ok(MessageType::Extended) => Ok(PeerMessage::Extended(
+            Some(MessageType::Piece) => Ok(PeerMessage::Piece(
+                ResponsePiecePayload::from_be_bytes(data),
+            )),
+            Some(MessageType::Cancel) => Ok(PeerMessage::Cancel(
+                RequestPiecePayload::from_be_bytes(data),
+            )),
+            Some(MessageType::Extended) => Ok(PeerMessage::Extended(
                 BasicExtensionPayload::from_be_bytes(data),
             )),
-            Err(_) => {
-                // now theoretically we would panic here or some sort.
-                // however there are extensions with make use of different message types.
-                // we will ignore them tho
-                // Err(std::io::Error::new(
-                //     std::io::ErrorKind::InvalidData,
-                //     format!("Invalid message type: {:?}", src[4]),
-                // ))
+            None => {
+                // we shouldn't be here realistically
+                // if we still managed to get here, I'g we just ignore it
                 src.advance(4 + data_length as usize);
                 return Ok(None);
             }

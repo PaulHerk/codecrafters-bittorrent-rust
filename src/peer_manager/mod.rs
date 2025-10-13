@@ -22,6 +22,7 @@ pub const BLOCK_QUEUE_SIZE_MAX: usize = 20;
 /// how many pieces are in the queue at max
 pub(crate) const MAX_PIECES_IN_PARALLEL: usize = 5;
 
+#[derive(Debug)]
 pub struct PeerManager {
     torrent_state: TorrentState,
     rx: mpsc::Receiver<ReqMsgFromPeer>,
@@ -29,6 +30,7 @@ pub struct PeerManager {
     peers: HashMap<[u8; 20], PeerConn>,
 }
 
+#[derive(Debug)]
 enum TorrentState {
     // We are waiting for metadata.
     WaitingForMetadata {
@@ -204,17 +206,19 @@ impl PeerManager {
     }
 
     pub async fn run(mut self) -> Result<(), PeerManagerError> {
-        if let TorrentState::Downloading {
-            metainfo: _,
-            piece_manager: _,
-        } = self.torrent_state
-        {
-            self.broadcast_peers(ResMessage::StartDownload).await?;
-        }
         while let Some(peer_msg) = self.rx.recv().await {
             match peer_msg.msg {
                 ReqMessage::NewConnection(peer_conn) => {
                     self.peers.insert(peer_msg.peer_id, peer_conn);
+
+                    if let TorrentState::Downloading {
+                        metainfo: _,
+                        piece_manager: _,
+                    } = self.torrent_state
+                    {
+                        self.send_peer(peer_msg.peer_id, ResMessage::StartDownload)
+                            .await?;
+                    }
                 }
                 ReqMessage::GotBlock(block) => {
                     if let TorrentState::Downloading {
@@ -261,7 +265,7 @@ impl PeerManager {
                     {
                         let blocks = piece_manager.prepare_next_blocks(
                             BLOCK_QUEUE_SIZE_MAX,
-                            peer_has,
+                            &peer_has,
                             metainfo,
                         );
                         let msg = ResMessage::NewBlockQueue(blocks);

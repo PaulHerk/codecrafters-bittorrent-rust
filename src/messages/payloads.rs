@@ -10,7 +10,7 @@ pub struct BitfieldPayload {
     pub(crate) pieces_available: Vec<bool>,
 }
 impl BitfieldPayload {
-    pub(crate) fn is_nothing(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.pieces_available.iter().all(|b| !*b)
     }
 }

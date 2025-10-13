@@ -18,16 +18,20 @@ impl Peer {
 
         let mut receiver_stream = mem::take(&mut self.receiver_stream)
             .expect("The receiver stream is initialized after creation of the peer.");
-        // ask peer_manager what we have
-        self.send_peer_manager(ReqMessage::WhatDoWeHave).await?;
+
+        self.send_extended_handshake().await?;
+        self.set_interested(true).await?;
         loop {
             if let Some(message) = receiver_stream.next().await {
                 if let Msg::Data(PeerMessage::Piece(_)) = message {
                 } else if let Msg::Data(PeerMessage::Extended(ref p)) = message
                     && p.extension_id == 2
                 {
-                    dbg!(&message);
-                }
+                } else {
+                    // dbg!(&message);
+                } /*else if let Msg::Manager(ResMessage::NewBlockQueue(_)) = message {
+                dbg!(&message);
+                }*/
                 match message {
                     Msg::Manager(peer_msg) => match peer_msg {
                         ResMessage::FinishedFile => {
@@ -50,12 +54,12 @@ impl Peer {
                                 .to_send
                                 .extend_from_slice(&req_piece_payload_msgs);
 
-                            // keep interested state up-to-date
-                            if self.queue.to_send.is_empty() {
-                                self.set_interested(false).await?;
-                            } else {
-                                self.set_interested(true).await?;
-                            };
+                            // TODO: keep interested state up-to-date
+                            // if self.queue.to_send.is_empty() {
+                            //     self.set_interested(false).await?;
+                            // } else {
+                            //     self.set_interested(true).await?;
+                            // };
                         }
                         ResMessage::Block(response_piece_payload) => {
                             if let Some(payload) = response_piece_payload {
@@ -65,7 +69,7 @@ impl Peer {
                         }
                         ResMessage::WeHave(bitfield) => {
                             // later TODO: implement lazy bitfield?
-                            if !bitfield.is_nothing() {
+                            if !bitfield.is_empty() {
                                 self.send_peer(PeerMessage::Bitfield(bitfield)).await?;
                             }
                         }
@@ -98,6 +102,7 @@ impl Peer {
                             *self.state.0.peer_choking.lock().unwrap() = true;
                         }
                         PeerMessage::Unchoke(_no_payload) => {
+                            eprintln!("PEER UNCHOKES");
                             *self.state.0.peer_choking.lock().unwrap() = false
                         }
                         PeerMessage::Interested(_no_payload) => {
@@ -112,7 +117,6 @@ impl Peer {
                         }
                         PeerMessage::Bitfield(bitfield_payload) => {
                             *self.state.0.has.lock().unwrap() = bitfield_payload.pieces_available;
-                            self.send_extended_handshake().await?;
                         }
                         PeerMessage::Request(request_piece_payload) => {
                             self.send_peer_manager(ReqMessage::NeedBlock(request_piece_payload))
@@ -150,6 +154,7 @@ impl Peer {
                     for req in queue_iter.into_iter() {
                         self.send_peer(req).await?;
                     }
+                    eprintln!("need queue");
                     self.send_peer_manager(ReqMessage::NeedBlockQueue).await?;
                 }
             } else {
