@@ -28,7 +28,7 @@ impl Peer {
                     && p.extension_id == 2
                 {
                 } else {
-                    // dbg!(&message);
+                    println!("INCOMING: {message:?}");
                 } /*else if let Msg::Manager(ResMessage::NewBlockQueue(_)) = message {
                 dbg!(&message);
                 }*/
@@ -46,7 +46,6 @@ impl Peer {
                             self.send_peer(PeerMessage::Have(have_payload)).await?;
                         }
                         ResMessage::NewBlockQueue(request_piece_payloads) => {
-                            dbg!(&request_piece_payloads);
                             let req_piece_payload_msgs: Vec<PeerMessage> = request_piece_payloads
                                 .into_iter()
                                 .map(PeerMessage::Request)
@@ -78,18 +77,19 @@ impl Peer {
                             let msg = {
                                 let extensions = self.state.0.extensions.lock().unwrap();
                                 if let Some(extensions) = extensions.as_ref()
-                                    && let Some((extension_id, _)) =
-                                        extensions.iter().find(|d| d.1.get_ext_type() == ext_type)
+                                    && let Some(extension_id) = extensions.iter().find_map(|d| {
+                                        (d.1.get_ext_type() == ext_type).then(|| *d.0)
+                                    })
                                 {
                                     Some(PeerMessage::Extended(BasicExtensionPayload {
-                                        extension_id: *extension_id,
+                                        extension_id,
                                         data,
                                     }))
                                 } else {
                                     None
                                 }
                             };
-                            if let Some(msg) = dbg!(msg) {
+                            if let Some(msg) = msg {
                                 self.queue.to_send.push(msg);
                                 self.set_interested(true).await?;
                             }

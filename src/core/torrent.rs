@@ -118,7 +118,7 @@ pub struct Metainfo {
     #[serde(flatten)]
     pub files: Key,
     #[serde(flatten)]
-    pub other: HashMap<String, serde_bencode::value::Value>,
+    pub other: serde_bencode::value::Value,
 }
 
 impl Metainfo {
@@ -136,7 +136,7 @@ impl Metainfo {
             length
         } else {
             dbg!(&self);
-            todo!()
+            todo!("Didn't implement Multifile yet.")
         }
     }
 }

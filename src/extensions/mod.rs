@@ -78,4 +78,6 @@ pub enum ExtensionType {
 }
 
 // the handshake is always active
+/// List of the active and implemented extensions.
+/// Note, that the index of the ExtensionType in here corresponds to the index of the extended message ID **+ 1**
 pub const ACTIVE_EXTENSIONS: &[ExtensionType] = &[ExtensionType::Metadata];

@@ -143,7 +143,7 @@ pub(crate) struct PieceState {
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
-enum BlockState {
+pub(crate) enum BlockState {
     Finished,
     InProcess,
     None,
@@ -307,10 +307,10 @@ impl PeerManager {
                     {
                         match extension_message {
                             ExtensionMessage::ReceivedMetadataPiece { piece_index, data } => {
+                                println!("Received metadata Block with index {piece_index}");
                                 metadata_piece_manager.add_block(piece_index, data.to_vec())?;
                                 if metadata_piece_manager.check_finished() {
                                     let metainfo = metadata_piece_manager.get_metadata().expect("This shouldn't fail since we checked that the hashes match.");
-                                    dbg!("Finished downloading metainfo", &metainfo);
                                     let torrent = Torrent {
                                         announce: self.announce_url.clone(),
                                         info: metainfo,
@@ -326,6 +326,7 @@ impl PeerManager {
                                         piece_manager,
                                     };
                                     self.broadcast_peers(ResMessage::StartDownload).await?;
+                                    eprintln!("Finished downloading the metainfo.");
                                 }
                             }
                             ExtensionMessage::GotMetadataLength(length) => {

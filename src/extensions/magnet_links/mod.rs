@@ -7,8 +7,8 @@ use crate::torrent::InfoHash;
 
 // mod before_download_manager;
 // mod peer_manager_init;
+pub(crate) mod metadata_msg;
 pub(crate) mod metadata_piece_manager;
-pub(crate) mod metadata_requester;
 
 const INFO_HASH_PREFIX: &'static str = "urn:btih";
 mod des_info_hash {

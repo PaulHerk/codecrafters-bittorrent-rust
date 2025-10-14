@@ -4,8 +4,9 @@ use std::collections::HashMap;
 use crate::{
     Peer,
     extensions::{
-        BasicExtensionPayload, ExtensionAction, ExtensionHandler, ExtensionMessage, ExtensionType,
-        factory::ExtensionFactory, protocol_extension_handshake::HandshakeExtension,
+        ACTIVE_EXTENSIONS, BasicExtensionPayload, ExtensionAction, ExtensionHandler,
+        ExtensionMessage, ExtensionType, factory::ExtensionFactory,
+        protocol_extension_handshake::HandshakeExtension,
     },
     messages::PeerMessage,
     peer::error::PeerError,
@@ -16,6 +17,7 @@ impl Peer {
     pub(super) async fn send_extended_handshake(&mut self) -> Result<(), PeerError> {
         if self.state.0.extensions.lock().unwrap().is_some() {
             let handshake_extension = HandshakeExtension::new();
+            dbg!(&handshake_extension);
             self.send_peer(PeerMessage::Extended(BasicExtensionPayload {
                 extension_id: 0,
                 data: serde_bencode::to_bytes(&handshake_extension)?,
@@ -35,7 +37,13 @@ impl Peer {
             if let Some(extensions) = maybe_extensions {
                 if payload.extension_id == ExtensionType::Handshake as u8 {
                     update_extensions(extensions, payload)?
-                } else if let Some(extension) = extensions.get(&payload.extension_id) {
+                } else if let Some(ext_type) =
+                    ACTIVE_EXTENSIONS.get(payload.extension_id as usize - 1)
+                    && let Some(extension) = extensions
+                        .iter()
+                        .find_map(|(_id, e)| (e.get_ext_type() == *ext_type).then(|| e))
+                // TODO: this might not be the fastest way (I call a function in each hashmaps value)
+                {
                     vec![extension.handle_message(&payload.data)]
                 } else {
                     vec![]
