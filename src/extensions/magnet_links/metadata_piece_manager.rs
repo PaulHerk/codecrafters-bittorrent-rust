@@ -1,4 +1,4 @@
-/// This is all for the PeerManager
+//! This is all for the PeerManager
 use std::io::{self, Cursor, Write};
 
 use sha1::{Digest, Sha1};

@@ -9,6 +9,7 @@ use crate::{
     },
     messages::PeerMessage,
     peer::error::PeerError,
+    peer_manager::ReqMessage,
 };
 
 impl Peer {
@@ -53,19 +54,18 @@ impl Peer {
     async fn handle_action(&mut self, action: ExtensionAction) -> Result<(), PeerError> {
         match action {
             ExtensionAction::SendPeer(peer_message) => self.send_peer(peer_message).await,
-            ExtensionAction::SendPeerManager(extension_message) => {
-                if let ExtensionMessage::ReceivedMetadataPiece {
+            ExtensionAction::SendPeerManager(msg) => {
+                // TODO: I update the self.queue.have_sent depending whether I received a real piece or a metadata piece on two different locations.
+                // maybe put the queue inside a Mutex aswell and let the PeerManager update it
+                if let ReqMessage::Extension(ExtensionMessage::ReceivedMetadataPiece {
                     piece_index: _,
                     data: _,
-                } = extension_message
+                }) = msg
                 {
                     self.queue.have_sent -= 1;
                 }
 
-                self.send_peer_manager(crate::peer_manager::ReqMessage::Extension(
-                    extension_message,
-                ))
-                .await
+                self.send_peer_manager(msg).await
             }
             ExtensionAction::Nothing => Ok(()),
             ExtensionAction::Multiple(actions) => {

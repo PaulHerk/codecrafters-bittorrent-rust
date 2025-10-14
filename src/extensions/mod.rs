@@ -4,6 +4,7 @@ use strum::{Display, EnumString};
 use crate::{
     extensions::protocol_extension_handshake::AdditionalHandshakeInfo,
     messages::{PeerMessage, payloads::Payload},
+    peer_manager::ReqMessage,
 };
 pub(crate) mod factory;
 pub mod magnet_links;
@@ -39,7 +40,7 @@ pub enum ExtensionAction {
     /// Send a message back to the remote peer.
     SendPeer(PeerMessage),
     /// Send a request to the PeerManager.
-    SendPeerManager(ExtensionMessage),
+    SendPeerManager(ReqMessage),
     /// Multiple actions
     Multiple(Vec<ExtensionAction>),
     /// Do nothing.
@@ -49,7 +50,6 @@ pub enum ExtensionAction {
 /// A message type specifically for communication from an extension to the PeerManager.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExtensionMessage {
-    NeedMetadataPiece,
     ReceivedMetadataPiece { piece_index: u32, data: Vec<u8> },
     GotMetadataLength(usize),
 }

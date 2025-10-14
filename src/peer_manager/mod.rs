@@ -68,7 +68,7 @@ impl TorrentState {
 }
 
 /// A message sent by a local peer to this Manager
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ReqMessage {
     NewConnection(PeerConn),
     NeedBlockQueue,
@@ -114,6 +114,12 @@ pub enum ResMessage {
 pub struct PeerConn {
     pub(super) sender: mpsc::Sender<ResMessage>,
     pub(super) identifier: PeerState,
+}
+
+impl PartialEq for PeerConn {
+    fn eq(&self, other: &Self) -> bool {
+        self.identifier.0.peer_id == other.identifier.0.peer_id
+    }
 }
 
 impl PeerConn {
@@ -270,6 +276,15 @@ impl PeerManager {
                         );
                         let msg = ResMessage::NewBlockQueue(blocks);
                         self.send_peer(peer_msg.peer_id, msg).await?;
+                    } else if let TorrentState::WaitingForMetadata {
+                        file_path: _,
+                        metadata_piece_manager,
+                    } = &mut self.torrent_state
+                    {
+                        let msg = get_metadata_queue(metadata_piece_manager)?;
+                        if let Some(msg) = msg {
+                            self.send_peer(peer_msg.peer_id, msg).await?;
+                        }
                     }
                 }
                 ReqMessage::WhatDoWeHave => {
@@ -291,12 +306,6 @@ impl PeerManager {
                     } = &mut self.torrent_state
                     {
                         match extension_message {
-                            ExtensionMessage::NeedMetadataPiece => {
-                                let msg = get_metadata_msg(metadata_piece_manager)?;
-                                if let Some(msg) = msg {
-                                    self.send_peer(peer_msg.peer_id, msg).await?;
-                                }
-                            }
                             ExtensionMessage::ReceivedMetadataPiece { piece_index, data } => {
                                 metadata_piece_manager.add_block(piece_index, data.to_vec())?;
                                 if metadata_piece_manager.check_finished() {
@@ -366,7 +375,8 @@ impl PeerManager {
 }
 
 /// helper function that get's the new blocks to be added and creates a message of it
-fn get_metadata_msg(
+/// it's not really a queue, rather just one message
+fn get_metadata_queue(
     metadata_piece_manager: &mut MetadataPieceManager,
 ) -> Result<Option<ResMessage>, PeerManagerError> {
     let new_data = metadata_piece_manager

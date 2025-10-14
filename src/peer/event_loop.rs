@@ -46,6 +46,7 @@ impl Peer {
                             self.send_peer(PeerMessage::Have(have_payload)).await?;
                         }
                         ResMessage::NewBlockQueue(request_piece_payloads) => {
+                            dbg!(&request_piece_payloads);
                             let req_piece_payload_msgs: Vec<PeerMessage> = request_piece_payloads
                                 .into_iter()
                                 .map(PeerMessage::Request)
@@ -88,7 +89,7 @@ impl Peer {
                                     None
                                 }
                             };
-                            if let Some(msg) = msg {
+                            if let Some(msg) = dbg!(msg) {
                                 self.queue.to_send.push(msg);
                                 self.set_interested(true).await?;
                             }

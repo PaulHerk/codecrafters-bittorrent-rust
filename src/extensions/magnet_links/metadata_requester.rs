@@ -1,10 +1,13 @@
-/// This is all for the peer itself
+//! This is all for the peer itself
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use crate::extensions::{
-    ExtensionAction, ExtensionHandler, ExtensionMessage,
-    protocol_extension_handshake::AdditionalHandshakeInfo,
+use crate::{
+    extensions::{
+        ExtensionAction, ExtensionHandler, ExtensionMessage,
+        protocol_extension_handshake::AdditionalHandshakeInfo,
+    },
+    peer_manager::ReqMessage,
 };
 
 #[derive(Debug)]
@@ -45,21 +48,21 @@ impl ExtensionHandler for MetadataRequester {
             return ExtensionAction::Nothing;
         };
         let data = data[offset..].to_vec();
-        ExtensionAction::SendPeerManager(ExtensionMessage::ReceivedMetadataPiece {
-            piece_index: msg.piece_index,
-            data,
-        })
+        ExtensionAction::SendPeerManager(ReqMessage::Extension(
+            ExtensionMessage::ReceivedMetadataPiece {
+                piece_index: msg.piece_index,
+                data,
+            },
+        ))
     }
 
     fn on_handshake(&self, additional_info: &AdditionalHandshakeInfo) -> ExtensionAction {
         let Some(length) = additional_info.metadata_size else {
-            return ExtensionAction::SendPeerManager(ExtensionMessage::NeedMetadataPiece);
+            return ExtensionAction::SendPeerManager(ReqMessage::NeedBlockQueue);
         };
-        let requests = vec![
-            ExtensionAction::SendPeerManager(ExtensionMessage::GotMetadataLength(length)),
-            ExtensionAction::SendPeerManager(ExtensionMessage::NeedMetadataPiece),
-        ];
-        ExtensionAction::Multiple(requests)
+        ExtensionAction::SendPeerManager(ReqMessage::Extension(
+            ExtensionMessage::GotMetadataLength(length),
+        ))
     }
 
     fn get_ext_type(&self) -> crate::extensions::ExtensionType {
@@ -95,10 +98,12 @@ mod test_metadata_msg {
         let action = metadata_requester.handle_message(bytes);
         assert_eq!(
             action,
-            ExtensionAction::SendPeerManager(ExtensionMessage::ReceivedMetadataPiece {
-                piece_index: 0,
-                data: b"xxxxxxxx".to_vec()
-            })
+            ExtensionAction::SendPeerManager(ReqMessage::Extension(
+                ExtensionMessage::ReceivedMetadataPiece {
+                    piece_index: 0,
+                    data: b"xxxxxxxx".to_vec()
+                }
+            ))
         );
     }
 }
