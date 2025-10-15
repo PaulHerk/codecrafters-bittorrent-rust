@@ -19,8 +19,11 @@ impl Peer {
         let mut receiver_stream = mem::take(&mut self.receiver_stream)
             .expect("The receiver stream is initialized after creation of the peer.");
 
+        // for the inital handshake, look in conn.rs
         self.send_extended_handshake().await?;
-        self.set_interested(true).await?;
+
+        // this message is essentially which kick-starts the loop
+        self.send_peer_manager(ReqMessage::WhatDoWeHave).await?;
         loop {
             if let Some(message) = receiver_stream.next().await {
                 if let Msg::Data(PeerMessage::Piece(_)) = message {
@@ -69,8 +72,13 @@ impl Peer {
                         }
                         ResMessage::WeHave(bitfield) => {
                             // later TODO: implement lazy bitfield?
-                            if !bitfield.is_empty() {
-                                self.send_peer(PeerMessage::Bitfield(bitfield)).await?;
+                            if bitfield.is_finished() {
+                                self.set_interested(false).await?;
+                            } else {
+                                self.set_interested(true).await?;
+                                if !bitfield.is_empty() {
+                                    self.send_peer(PeerMessage::Bitfield(bitfield)).await?;
+                                }
                             }
                         }
                         ResMessage::ExtensionData((ext_type, data)) => {
@@ -91,7 +99,6 @@ impl Peer {
                             };
                             if let Some(msg) = msg {
                                 self.queue.to_send.push(msg);
-                                self.set_interested(true).await?;
                             }
                         }
                         ResMessage::StartDownload => {

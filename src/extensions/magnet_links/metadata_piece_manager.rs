@@ -1,6 +1,7 @@
 //! This is all for the PeerManager
 
 use bytes::{Bytes, BytesMut};
+use rand::seq::IteratorRandom;
 use sha1::{Digest, Sha1};
 
 use crate::{
@@ -43,13 +44,13 @@ impl MetadataPieceManager {
             .queue
             .iter()
             .position(|i_have| *i_have == BlockState::None)
-        // .or_else(|| {
-        //     self.queue
-        //         .iter()
-        //         .enumerate()
-        //         .filter_map(|(index, i_have)| (*i_have == BlockState::InProcess).then(|| index))
-        //         .choose(&mut rand::rng())
-        // })
+            .or_else(|| {
+                self.queue
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, i_have)| (*i_have == BlockState::InProcess).then(|| index))
+                    .choose(&mut rand::rng())
+            })
         // TODO: send the message to multiple peers (if I'd just do that, it would send the same one multiple times to the same peer)
         else {
             return Ok(None);

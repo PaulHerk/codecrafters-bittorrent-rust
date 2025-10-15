@@ -298,6 +298,13 @@ impl PeerManager {
                             pieces_available: piece_manager.have.clone(),
                         });
                         self.send_peer(peer_msg.peer_id, msg).await?;
+                    } else {
+                        // TODO?: if we don't have the metainfo, we don't know if we have
+                        // omg I can't think rn
+                        let msg = ResMessage::WeHave(BitfieldPayload {
+                            pieces_available: vec![false],
+                        });
+                        self.send_peer(peer_msg.peer_id, msg).await?;
                     }
                 }
                 ReqMessage::Extension(extension_message) => {

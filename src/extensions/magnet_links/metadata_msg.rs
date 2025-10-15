@@ -42,12 +42,10 @@ impl ExtensionHandler for MetadataRequester {
         let Ok(msg): Result<MetadataMsg, _> = serde_bencode::from_bytes(data) else {
             return ExtensionAction::Nothing;
         };
-        let Some(total_size) = msg.total_size else {
-            return ExtensionAction::Nothing;
-        };
-        let Some(offset) = data.len().checked_sub(total_size as usize) else {
-            return ExtensionAction::Nothing;
-        };
+        // might not be the most efficient to serialize it again but who gives a fuck at this point really
+        let offset = serde_bencode::to_bytes(&msg)
+            .expect("we just deserialized it so serializing it again shoudln't be a problem.")
+            .len();
         let data = Bytes::copy_from_slice(&data[offset..]);
         ExtensionAction::SendPeerManager(ReqMessage::Extension(
             ExtensionMessage::ReceivedMetadataPiece {

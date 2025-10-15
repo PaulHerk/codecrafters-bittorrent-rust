@@ -175,7 +175,7 @@ impl Encoder<PeerMessage> for MessageFramer {
         // accept.
         let bytes = item.to_be_bytes();
         // if it's a keep-alive message, it has a length of 0 but is discarded afterwards
-        let length = if bytes.is_empty() { 0 } else { bytes.len() + 1 };
+        let length = bytes.len() + 1;
         if length as u32 > MAX {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,

@@ -50,7 +50,7 @@ impl Handshake {
             })?;
 
         // read handshake
-        handshake_bytes = [0_u8; 68];
+        handshake_bytes = [0_u8; HANDSHAKE_LEN];
         tcp.read_exact(&mut handshake_bytes)
             .await
             .map_err(PeerError::RecvHandshake)?;

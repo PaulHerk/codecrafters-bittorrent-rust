@@ -15,6 +15,9 @@ impl BitfieldPayload {
     pub(crate) fn is_empty(&self) -> bool {
         self.pieces_available.iter().all(|b| !*b)
     }
+    pub(crate) fn is_finished(&self) -> bool {
+        self.pieces_available.iter().all(|b| *b)
+    }
 }
 impl Payload for BitfieldPayload {
     fn from_be_bytes(payload: &[u8]) -> Self {
