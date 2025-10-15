@@ -1,4 +1,5 @@
 //! This is all for the peer itself
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
@@ -47,7 +48,7 @@ impl ExtensionHandler for MetadataRequester {
         let Some(offset) = data.len().checked_sub(total_size as usize) else {
             return ExtensionAction::Nothing;
         };
-        let data = data[offset..].to_vec();
+        let data = Bytes::copy_from_slice(&data[offset..]);
         ExtensionAction::SendPeerManager(ReqMessage::Extension(
             ExtensionMessage::ReceivedMetadataPiece {
                 piece_index: msg.piece_index,
@@ -101,7 +102,7 @@ mod test_metadata_msg {
             ExtensionAction::SendPeerManager(ReqMessage::Extension(
                 ExtensionMessage::ReceivedMetadataPiece {
                     piece_index: 0,
-                    data: b"xxxxxxxx".to_vec()
+                    data: b"xxxxxxxx"[..].into()
                 }
             ))
         );

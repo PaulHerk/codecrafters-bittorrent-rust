@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::path::PathBuf;
 
 pub use hashes::Hashes;
 use serde::{Deserialize, Serialize};

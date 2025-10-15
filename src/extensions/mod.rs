@@ -1,4 +1,4 @@
-use bytes::BufMut;
+use bytes::{BufMut, Bytes, BytesMut};
 use strum::{Display, EnumString};
 
 use crate::{
@@ -16,21 +16,21 @@ pub(crate) mod protocol_extension_handshake;
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BasicExtensionPayload {
     pub(crate) extension_id: u8,
-    pub(crate) data: Vec<u8>,
+    pub(crate) data: Bytes,
 }
 
 impl Payload for BasicExtensionPayload {
     fn from_be_bytes(data: &[u8]) -> Self {
         let extension_id = u8::from_be(data[0]);
-        let data = data[1..].to_vec();
+        let data = Bytes::copy_from_slice(&data[1..]);
         Self { extension_id, data }
     }
 
-    fn to_be_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(self.data.len() + 1);
+    fn to_be_bytes(&self) -> Bytes {
+        let mut bytes = BytesMut::with_capacity(self.data.len() + 1);
         bytes.put_u8(self.extension_id);
-        bytes.extend_from_slice(&self.data);
-        bytes
+        bytes.put_slice(&self.data);
+        bytes.freeze()
     }
 }
 
@@ -50,7 +50,7 @@ pub enum ExtensionAction {
 /// A message type specifically for communication from an extension to the PeerManager.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExtensionMessage {
-    ReceivedMetadataPiece { piece_index: u32, data: Vec<u8> },
+    ReceivedMetadataPiece { piece_index: u32, data: Bytes },
     GotMetadataLength(usize),
 }
 

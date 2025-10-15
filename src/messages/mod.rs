@@ -1,5 +1,5 @@
 use bytes::BufMut;
-use bytes::{Buf, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 use payloads::*;
 use strum::{AsRefStr, FromRepr};
 use tokio_util::codec::Decoder;
@@ -27,7 +27,7 @@ pub enum PeerMessage {
 
 // TODO: impl Payload for PeerMessage, then put decode logic here
 impl PeerMessage {
-    fn to_be_bytes(&self) -> Vec<u8> {
+    fn to_be_bytes(&self) -> Bytes {
         match self {
             PeerMessage::Choke(payload) => payload.to_be_bytes(),
             PeerMessage::Unchoke(payload) => payload.to_be_bytes(),
@@ -175,7 +175,7 @@ impl Encoder<PeerMessage> for MessageFramer {
         // accept.
         let bytes = item.to_be_bytes();
         // if it's a keep-alive message, it has a length of 0 but is discarded afterwards
-        let length = bytes.len() + 1;
+        let length = if bytes.is_empty() { 0 } else { bytes.len() + 1 };
         if length as u32 > MAX {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -189,12 +189,12 @@ impl Encoder<PeerMessage> for MessageFramer {
         };
 
         // Reserve space in the buffer.
-        dst.reserve(length);
+        dst.reserve(length + 4);
 
         // Write the length and string to the buffer.
         dst.put_u32(length as u32);
         dst.put_u8(msg_type as u8);
-        dst.extend_from_slice(&bytes);
+        dst.put_slice(&bytes);
 
         Ok(())
     }

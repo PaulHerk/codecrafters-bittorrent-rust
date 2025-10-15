@@ -1,5 +1,6 @@
 use std::{collections::HashMap, path::PathBuf};
 
+use bytes::{Bytes, BytesMut};
 use tokio::sync::mpsc;
 
 use crate::{
@@ -107,7 +108,7 @@ pub enum ResMessage {
     FinishedFile,
     /// Data that is passed to BasicExtensionPayload.
     /// The peer has to 'add' the extended_msg_id itself since it is peer-dependent
-    ExtensionData((ExtensionType, Vec<u8>)),
+    ExtensionData((ExtensionType, Bytes)),
 }
 
 #[derive(Debug, Clone)]
@@ -139,7 +140,7 @@ impl PeerConn {
 pub(crate) struct PieceState {
     blocks: Vec<BlockState>,
     piece_i: u32,
-    buf: Vec<u8>,
+    buf: BytesMut,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
@@ -308,7 +309,7 @@ impl PeerManager {
                         match extension_message {
                             ExtensionMessage::ReceivedMetadataPiece { piece_index, data } => {
                                 println!("Received metadata Block with index {piece_index}");
-                                metadata_piece_manager.add_block(piece_index, data.to_vec())?;
+                                metadata_piece_manager.add_block(piece_index, data);
                                 if metadata_piece_manager.check_finished() {
                                     let metainfo = metadata_piece_manager.get_metadata().expect("This shouldn't fail since we checked that the hashes match.");
                                     let torrent = Torrent {

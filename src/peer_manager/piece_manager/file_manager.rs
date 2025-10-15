@@ -1,5 +1,6 @@
 use std::os::unix::fs::FileExt;
 
+use bytes::BytesMut;
 use sha1::{Digest, Sha1};
 
 use super::PieceState;
@@ -72,7 +73,7 @@ impl PieceManager {
         req_payload: RequestPiecePayload,
         metainfo: &Metainfo,
     ) -> Option<ResponsePiecePayload> {
-        let mut buf = vec![0_u8; req_payload.length as usize];
+        let mut buf = BytesMut::zeroed(req_payload.length as usize);
         let offset =
             req_payload.index as u64 * metainfo.piece_length as u64 + req_payload.begin as u64;
         if self.file.read_exact_at(&mut buf, offset).is_err() {
@@ -82,7 +83,7 @@ impl PieceManager {
         let res = ResponsePiecePayload {
             index: req_payload.index,
             begin: req_payload.begin,
-            block: buf,
+            block: buf.freeze(),
         };
         Some(res)
     }

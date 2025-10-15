@@ -1,7 +1,9 @@
+use bytes::{Bytes, BytesMut};
+
 pub trait Payload {
     fn from_be_bytes(payload: &[u8]) -> Self;
     /// the bytes in BE order without the length & message prefix
-    fn to_be_bytes(&self) -> Vec<u8>;
+    fn to_be_bytes(&self) -> Bytes;
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -27,15 +29,12 @@ impl Payload for BitfieldPayload {
         Self { pieces_available }
     }
 
-    fn to_be_bytes(&self) -> Vec<u8> {
-        self.pieces_available
-            .chunks(8)
-            .map(|byte| {
-                byte.iter()
-                    .enumerate()
-                    .fold(0_u8, |acc, (i, &b)| acc | (if b { 128_u8 >> i } else { 0 }))
-            })
-            .collect()
+    fn to_be_bytes(&self) -> Bytes {
+        Bytes::from_iter(self.pieces_available.chunks(8).map(|byte| {
+            byte.iter()
+                .enumerate()
+                .fold(0_u8, |acc, (i, &b)| acc | (if b { 128_u8 >> i } else { 0 }))
+        }))
     }
 }
 
@@ -63,12 +62,12 @@ impl Payload for RequestPiecePayload {
             .unwrap()
             .0
     }
-    fn to_be_bytes(&self) -> Vec<u8> {
-        let mut bytes = vec![0u8; 12];
+    fn to_be_bytes(&self) -> Bytes {
+        let mut bytes = BytesMut::zeroed(12);
         bytes[0..4].copy_from_slice(&self.index.to_be_bytes());
         bytes[4..8].copy_from_slice(&self.begin.to_be_bytes());
         bytes[8..12].copy_from_slice(&self.length.to_be_bytes());
-        bytes
+        bytes.freeze()
     }
 }
 
@@ -76,27 +75,27 @@ impl Payload for RequestPiecePayload {
 pub struct ResponsePiecePayload {
     pub(crate) index: u32,
     pub(crate) begin: u32,
-    pub(crate) block: Vec<u8>,
+    pub(crate) block: Bytes,
 }
 
 impl Payload for ResponsePiecePayload {
     fn from_be_bytes(bytes: &[u8]) -> Self {
         let block_length = bytes.len() - 8;
-        let mut block = vec![0u8; block_length];
+        let mut block = BytesMut::zeroed(block_length);
         block[..block_length].copy_from_slice(&bytes[8..8 + block_length]);
         Self {
             index: u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
             begin: u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]),
-            block: block.to_vec(),
+            block: block.freeze(),
         }
     }
-    fn to_be_bytes(&self) -> Vec<u8> {
-        let mut bytes = vec![0u8; 8 + self.block.len()];
+    fn to_be_bytes(&self) -> Bytes {
+        let mut bytes = BytesMut::zeroed(8 + self.block.len());
         bytes[0..4].copy_from_slice(&self.index.to_be_bytes());
         bytes[4..8].copy_from_slice(&self.begin.to_be_bytes());
         bytes[8..].copy_from_slice(&self.block);
 
-        bytes
+        bytes.freeze()
     }
 }
 
@@ -116,8 +115,8 @@ impl Payload for HavePayload {
             ),
         }
     }
-    fn to_be_bytes(&self) -> Vec<u8> {
-        self.piece_index.to_be_bytes().to_vec()
+    fn to_be_bytes(&self) -> Bytes {
+        Bytes::from_owner(self.piece_index.to_be_bytes())
     }
 }
 
@@ -127,7 +126,7 @@ impl Payload for NoPayload {
     fn from_be_bytes(_payload: &[u8]) -> Self {
         Self
     }
-    fn to_be_bytes(&self) -> Vec<u8> {
-        vec![]
+    fn to_be_bytes(&self) -> Bytes {
+        Bytes::new()
     }
 }

@@ -1,3 +1,4 @@
+use bytes::BytesMut;
 use rand::seq::IteratorRandom;
 
 use crate::{
@@ -121,7 +122,7 @@ impl PieceState {
         PieceState {
             blocks: vec![BlockState::None; n_blocks as usize],
             piece_i,
-            buf: vec![0; piece_size as usize],
+            buf: BytesMut::zeroed(piece_size as usize),
         }
     }
 }
