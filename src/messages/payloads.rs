@@ -20,10 +20,10 @@ impl Payload for BitfieldPayload {
     fn from_be_bytes(payload: &[u8]) -> Self {
         let mut pieces_available = vec![false; payload.len() * 8];
         for (byte_i, byte) in payload.iter().enumerate() {
-            let mut i = 0_u8;
-            while i < 8 && byte << i != 0 {
-                pieces_available[byte_i * 8 + i as usize] = true;
-                i += 1;
+            for i in 0..8 {
+                if 1u8.rotate_right(i + 1) & byte != 0 {
+                    pieces_available[byte_i * 8 + i as usize] = true;
+                }
             }
         }
         Self { pieces_available }
@@ -128,5 +128,56 @@ impl Payload for NoPayload {
     }
     fn to_be_bytes(&self) -> Bytes {
         Bytes::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bitfield_payload() {
+        let payload = BitfieldPayload {
+            pieces_available: vec![true, false, true, false, true, false, true, false, true],
+        };
+        let bytes = payload.to_be_bytes();
+        let payload2 = BitfieldPayload::from_be_bytes(&bytes);
+        // The from_be_bytes function pads with 'false' values to the next full byte,
+        // so we need to do the same for the original payload to compare them.
+        let mut expected_pieces = payload.pieces_available.clone();
+        expected_pieces.resize(16, false);
+        assert_eq!(payload2.pieces_available, expected_pieces);
+    }
+
+    #[test]
+    fn test_request_piece_payload() {
+        let payload = RequestPiecePayload {
+            index: 1,
+            begin: 2,
+            length: 3,
+        };
+        let bytes = payload.to_be_bytes();
+        let payload2 = RequestPiecePayload::from_be_bytes(&bytes);
+        assert_eq!(payload, payload2);
+    }
+
+    #[test]
+    fn test_response_piece_payload() {
+        let payload = ResponsePiecePayload {
+            index: 1,
+            begin: 2,
+            block: Bytes::from_owner([1, 2, 3, 4]),
+        };
+        let bytes = payload.to_be_bytes();
+        let payload2 = ResponsePiecePayload::from_be_bytes(&bytes);
+        assert_eq!(payload, payload2);
+    }
+
+    #[test]
+    fn test_have_payload() {
+        let payload = HavePayload { piece_index: 1 };
+        let bytes = payload.to_be_bytes();
+        let payload2 = HavePayload::from_be_bytes(&bytes);
+        assert_eq!(payload, payload2);
     }
 }
