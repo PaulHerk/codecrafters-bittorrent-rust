@@ -372,6 +372,7 @@ impl PeerManager {
                 .unwrap()
                 .clone(),
         )
+        .and_then(|q| if q.is_empty() { None } else { Some(q) })
     }
 
     async fn broadcast_peers(&mut self, msg: ResMessage) -> Result<(), PeerManagerError> {
