@@ -13,7 +13,7 @@ use crate::{
     messages::payloads::{BitfieldPayload, RequestPiecePayload, ResponsePiecePayload},
     peer::conn::PeerState,
     peer_manager::{error::PeerManagerError, piece_manager::PieceManager},
-    torrent::Metainfo,
+    torrent::{InfoHash, Metainfo},
 };
 
 pub mod error;
@@ -77,6 +77,7 @@ pub enum ReqMessage {
     NeedBlock(RequestPiecePayload),
     WhatDoWeHave,
     Extension(ExtensionMessage),
+    PeerDisconnected(InfoHash),
 }
 
 pub struct ReqMsgFromPeer {
@@ -264,7 +265,9 @@ impl PeerManager {
                     }
                 }
                 ReqMessage::NeedBlockQueue => {
-                    let peer_has = self.get_peer_has(&peer_msg.peer_id)?;
+                    let Some(peer_has) = self.get_peer_has(&peer_msg.peer_id) else {
+                        continue;
+                    };
                     if let TorrentState::Downloading {
                         metainfo,
                         piece_manager,
@@ -343,6 +346,9 @@ impl PeerManager {
                         }
                     }
                 }
+                ReqMessage::PeerDisconnected(info_hash) => {
+                    self.peers.remove(&info_hash.0);
+                }
             }
         }
 
@@ -361,17 +367,17 @@ impl PeerManager {
         peer.send(msg, peer_id).await
     }
 
-    fn get_peer_has(&self, peer_id: &[u8; 20]) -> Result<Vec<bool>, PeerManagerError> {
-        Ok(self
-            .peers
-            .get(peer_id)
-            .ok_or(PeerManagerError::PeerNotFound)?
-            .identifier
-            .0
-            .has
-            .lock()
-            .unwrap()
-            .clone())
+    fn get_peer_has(&self, peer_id: &[u8; 20]) -> Option<Vec<bool>> {
+        Some(
+            self.peers
+                .get(peer_id)?
+                .identifier
+                .0
+                .has
+                .lock()
+                .unwrap()
+                .clone(),
+        )
     }
 
     async fn broadcast_peers(&mut self, msg: ResMessage) -> Result<(), PeerManagerError> {

@@ -7,6 +7,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use futures_core::Stream;
+use futures_util::SinkExt;
 use futures_util::StreamExt;
 use futures_util::stream::SplitSink;
 use futures_util::stream::SplitStream;
@@ -184,3 +185,17 @@ impl PeerState {
 pub(super) type BoxedMsgStream = Pin<Box<dyn Stream<Item = Msg> + Send + Sync>>;
 pub(super) type PeerWriter = SplitSink<Framed<TcpStream, MessageFramer>, PeerMessage>;
 type PeerReader = SplitStream<Framed<TcpStream, MessageFramer>>;
+
+impl Drop for Peer {
+    fn drop(&mut self) {
+        // send message to peer manager that so removes us
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                let _ = self
+                    .send_peer_manager(ReqMessage::PeerDisconnected(InfoHash(self.get_id())))
+                    .await;
+                let _ = self.peer_writer.close().await;
+            });
+        });
+    }
+}
