@@ -1,3 +1,5 @@
+//! a peer announces to us that he exists via the mpsc
+//! We create peer with our current have bitfield which he can send to new connections and we send
 use std::{collections::HashMap, path::PathBuf};
 
 use bytes::{Bytes, BytesMut};
@@ -85,17 +87,8 @@ pub struct ReqMsgFromPeer {
     pub(crate) msg: ReqMessage,
 }
 
-// a peer announces to us that he exists via the mpsc
-// We create peer with our current have bitfield which he can send to new connections and we send
-
-// Next-up:
-// - split it into ReqMessage and ResMessage (TODO: better naming)
-// - the PeerManager has access to all peers with a HashMap<PeerHash, mpsc::Sender<ResMessage>>, and maybe also the download speed
-// - allows to implement:
+// TODO Next-up:
 //  - rarest-first-piece-selection
-//  - peer not shutting down if the queue is empty, rather the Manager sends the shuttdown to all peers
-//    (the peers have to send the shutdown back)
-//  - remove the has-broadcaster from peers, Manager handles this
 //  - choking: 4 active downloaders
 
 #[derive(Debug, Clone, PartialEq)]
@@ -302,8 +295,9 @@ impl PeerManager {
                         });
                         self.send_peer(peer_msg.peer_id, msg).await?;
                     } else {
-                        // TODO?: if we don't have the metainfo, we don't know if we have
-                        // omg I can't think rn
+                        // If we don't have the metainfo, we have nothing.
+                        // We don't know the length either so we just return one element.
+                        // We don't send the bitfield if it's empty anyway
                         let msg = ResMessage::WeHave(BitfieldPayload {
                             pieces_available: vec![false],
                         });

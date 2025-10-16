@@ -38,8 +38,7 @@ impl Peer {
                 match message {
                     Msg::Manager(peer_msg) => match peer_msg {
                         ResMessage::FinishedFile => {
-                            // TODO: set flags
-                            if self.sever_conn().await {
+                            if !*self.state.0.peer_interested.lock().unwrap() {
                                 break Ok(());
                             }
                         }
@@ -68,7 +67,7 @@ impl Peer {
                             if let Some(payload) = response_piece_payload {
                                 self.send_peer(PeerMessage::Piece(payload)).await?;
                             }
-                            // TODO: else?
+                            // if we don't have the piece, Ig we just ignore
                         }
                         ResMessage::WeHave(bitfield) => {
                             // later TODO: implement lazy bitfield?

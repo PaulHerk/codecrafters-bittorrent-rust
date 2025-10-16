@@ -20,6 +20,7 @@ use tokio_util::codec::Framed;
 use tokio_util::time::FutureExt;
 
 use crate::extensions::ExtensionHandler;
+use crate::messages::payloads::NoPayload;
 use crate::messages::{MessageFramer, PeerMessage};
 use crate::peer::Msg;
 use crate::peer::Peer;
@@ -191,6 +192,7 @@ impl Drop for Peer {
         // send message to peer manager that so removes us
         tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
+                let _ = self.set_interested(false).await;
                 let _ = self
                     .send_peer_manager(ReqMessage::PeerDisconnected(InfoHash(self.get_id())))
                     .await;

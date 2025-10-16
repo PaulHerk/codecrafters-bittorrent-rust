@@ -20,7 +20,6 @@ use crate::torrent::{InfoHash, Metainfo, Torrent};
 pub(crate) struct DBEntry {
     pub(crate) bitfield: Cow<'static, [bool]>,
     pub(crate) file: Cow<'static, Path>,
-    // TODO: don't store path, rather the content
     pub(crate) torrent_info: Metainfo,
     pub(crate) announce: url::Url,
 }

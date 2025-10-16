@@ -51,7 +51,8 @@ impl MetadataPieceManager {
                     .filter_map(|(index, i_have)| (*i_have == BlockState::InProcess).then(|| index))
                     .choose(&mut rand::rng())
             })
-        // TODO: send the message to multiple peers (if I'd just do that, it would send the same one multiple times to the same peer)
+        // Note that one peer will not get the same request twice since it won't ask for another if it's waiting for the response of one.
+        // If it got the response, it won't get the piece again anyways.
         else {
             return Ok(None);
         };
