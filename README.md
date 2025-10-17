@@ -4,6 +4,12 @@ This project started out on codecrafters: [link to the challenge](https://app.co
 
 I somehow found pretty big interest in peer-to-peer communication. I found a challenge where you implement BitTorrent by yourself from scratch on a pretty cool coding website (see above). Now I completed the main part (it's only partial on their website) and want to implement the rest of the [protocol](https://bittorrent.org/beps/bep_0003.html) (no extensions).
 
+## current actual status:
+You can download basically most of the torrents which are only single file.
+This means you can go to some site like piratebay (which is quite nice for testing since there aren't so many magnet link providers with active peers out there), copy the magnet like and put it in the program like so: `cargo r --release -- download_magnet [YOUR_MAGNET_LINK]`.
+It saves the current state to disk so if you want to cancel the program and start it again, it will continue where it left of.
+You cannot seed yet.
+
 ## features (done / want to add)
 
 - [X] downloading a file from the peers of the tracker found in the .torrent file
@@ -26,6 +32,7 @@ Commands:
   handshake
   download_piece
   download
+  download_magnet
   help            Print this message or the help of the given subcommand(s)
 
 Options:
@@ -33,13 +40,13 @@ Options:
   -V, --version  Print version
 ```
 
-Now you'll probably want to use the "download" command which looks like that:
+Now you'll probably want to use the "download_magnet" command which looks like that:
 
 ```
-Usage: codecrafters-bittorrent download [OPTIONS] <TORRENT>
+Usage: codecrafters-bittorrent download_magnet [OPTIONS] <TORRENT>
 
 Arguments:
-  <TORRENT>
+  <MAGNET_LINK>
 
 Options:
   -o <OUTPUT>
