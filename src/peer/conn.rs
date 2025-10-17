@@ -21,7 +21,6 @@ use tokio_util::codec::Framed;
 use tokio_util::time::FutureExt;
 
 use crate::extensions::ExtensionHandler;
-use crate::messages::payloads::NoPayload;
 use crate::messages::{MessageFramer, PeerMessage};
 use crate::peer::Msg;
 use crate::peer::Peer;

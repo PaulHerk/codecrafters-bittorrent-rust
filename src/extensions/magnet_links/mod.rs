@@ -1,7 +1,7 @@
-use std::net::SocketAddrV4;
+use std::{net::SocketAddrV4, str::FromStr};
 
-use serde::Deserialize;
 use thiserror::Error;
+use url::form_urlencoded::Parse;
 
 use crate::torrent::InfoHash;
 
@@ -11,70 +11,33 @@ pub(crate) mod metadata_msg;
 pub(crate) mod metadata_piece_manager;
 
 const INFO_HASH_PREFIX: &'static str = "urn:btih";
-mod des_info_hash {
-    use std::fmt;
 
-    use serde::{
-        Deserialize, Deserializer,
-        de::{self, Visitor},
-    };
+impl FromStr for InfoHash {
+    type Err = anyhow::Error;
 
-    use crate::{extensions::magnet_links::INFO_HASH_PREFIX, torrent::InfoHash};
-
-    struct InfoHashVisitor;
-
-    impl<'de> Visitor<'de> for InfoHashVisitor {
-        type Value = InfoHash;
-
-        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-            formatter.write_str("'urn:btih': followed by the 40-char hex-encoded info hash")
-        }
-
-        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-        where
-            E: de::Error,
-        {
-            let starting_str_occ = &v[..INFO_HASH_PREFIX.len()];
-            if INFO_HASH_PREFIX != starting_str_occ {
-                Err(E::custom(format!(
-                    "invalid prefix, got: {starting_str_occ}, expected: {INFO_HASH_PREFIX}"
-                )))
-            } else {
-                let hex_hash = &v[INFO_HASH_PREFIX.len() + 1..]; // +1 for the colon
-                let bytes_hash = hex::decode(hex_hash).map_err(|e| {
-                    E::custom(format!(
-                        "`{hex_hash}` is not a valid hex string. Failed with error: {e}"
-                    ))
-                })?;
-                let bytes_hash: [u8; 20] = bytes_hash.try_into().map_err(|e| {
-                    E::custom(format!(
-                        "Couldn't convert the hex into a valid 20 byte array: `{e:?}`"
-                    ))
-                })?;
-                Ok(InfoHash(bytes_hash))
-            }
-        }
-    }
-    impl<'de> Deserialize<'de> for InfoHash {
-        fn deserialize<D>(deserializer: D) -> Result<InfoHash, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            deserializer.deserialize_bytes(InfoHashVisitor)
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let starting_str_occ = &s[..INFO_HASH_PREFIX.len()];
+        if INFO_HASH_PREFIX != starting_str_occ {
+            anyhow::bail!("invalid prefix, got: {starting_str_occ}, expected: {INFO_HASH_PREFIX}")
+        } else {
+            let hex_hash = &s[INFO_HASH_PREFIX.len() + 1..]; // +1 for the colon
+            let bytes_hash = hex::decode(hex_hash).map_err(|e| {
+                anyhow::anyhow!("`{hex_hash}` is not a valid hex string. Failed with error: {e}")
+            })?;
+            let bytes_hash: [u8; 20] = bytes_hash.try_into().map_err(|e| {
+                anyhow::anyhow!("Couldn't convert the hex into a valid 20 byte array: `{e:?}`")
+            })?;
+            Ok(InfoHash(bytes_hash))
         }
     }
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct MagnetLink {
-    #[serde(rename = "xt")]
     pub info_hash: InfoHash,
-    #[serde(rename = "dn")]
     file_name: Option<String>,
-    #[serde(rename = "tr")]
-    trackers: Option<url::Url>,
-    #[serde(rename = "x.pe")]
-    peer_addr: Option<SocketAddrV4>,
+    trackers: Vec<url::Url>,
+    peer_addrs: Vec<SocketAddrV4>,
 }
 
 impl MagnetLink {
@@ -83,25 +46,65 @@ impl MagnetLink {
         if url.scheme() != "magnet" {
             return Err(MagnetLinkError::NoMagnetLink);
         }
-        // TODO: we need to update the deserialialization to use .query_pairs() because apparently serde_urlencoded() doesn't support multiple fields
-        let query = url
-            .as_str()
-            .split_once('?')
-            .ok_or(MagnetLinkError::NoQueryFound)?
-            .1;
-        let magnet_link = serde_urlencoded::from_str(query)?;
-        Ok(magnet_link)
+
+        Self::from_query_pairs(url.query_pairs())
     }
+
     pub fn get_announce_url(&self) -> Result<url::Url, MagnetLinkError> {
-        let mut url = self.trackers.clone().ok_or(MagnetLinkError::NoTrackerUrl)?;
-        // current workaround for some trackers that only announce their udp addr but also have support for http
-        if url.scheme() == "udp" {
-            url.set_path("/announce");
-            let url_str = &url.as_str()[3..];
-            url = url::Url::parse(&format!("http{url_str}")).expect("is valid");
-            // the reason I do this is because I cannot set the scheme via .set_scheme() from udp to http
-        }
+        let url = self
+            .trackers
+            .first()
+            .ok_or(MagnetLinkError::NoTrackerUrl)?
+            .clone();
         Ok(url)
+    }
+
+    fn from_query_pairs(pairs: Parse) -> Result<Self, MagnetLinkError> {
+        let mut trackers = Vec::new();
+        let mut peer_addrs = Vec::new();
+        let mut file_name = None;
+        let mut info_hash = None;
+
+        for (key, value) in pairs.into_iter() {
+            match key.as_ref() {
+                "xt" => {
+                    info_hash = Some(InfoHash::from_str(&value)?);
+                }
+                "tr" => {
+                    if let Ok(mut url) = url::Url::parse(&value) {
+                        // current workaround for some trackers that only announce their udp addr but also have support for http
+                        if url.scheme() == "udp" {
+                            url.set_path("/announce");
+                            let url_str = &url.as_str()[3..];
+                            url = url::Url::parse(&format!("http{url_str}")).expect("is valid");
+                            // the reason I do this is because I cannot set the scheme via .set_scheme() from udp to http
+                        }
+                        trackers.push(url);
+                    }
+                }
+                "x.pe" => {
+                    if let Ok(addr) = SocketAddrV4::from_str(&value) {
+                        peer_addrs.push(addr);
+                    }
+                }
+                "dn" => {
+                    if !value.is_empty() {
+                        file_name = Some(value.into_owned())
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let info_hash = info_hash.ok_or(MagnetLinkError::InvalidInfoHash(anyhow::anyhow!(
+            "No info hash provided."
+        )))?;
+        Ok(Self {
+            info_hash,
+            trackers,
+            peer_addrs,
+            file_name,
+        })
     }
 }
 
@@ -113,6 +116,8 @@ pub enum MagnetLinkError {
     NoMagnetLink,
     #[error("No query was provided.")]
     NoQueryFound,
+    #[error("Failed to deserialize the info-hash")]
+    InvalidInfoHash(#[from] anyhow::Error),
     #[error("Failed to deserialize the query in the link with the error: `{0}`")]
     FailedToDesQuery(#[from] serde_urlencoded::de::Error),
     #[error("downloading from a magnetlink without a provided tracker url isn't supported")]
@@ -125,7 +130,7 @@ mod test_magnetlink {
     #[test]
     fn parse() {
         let magnet_link = MagnetLink::from_url(
-            "magnet:?xt=urn:btih:ad42ce8109f54c99613ce38f9b4d87e70f24a165&dn=magnet1.gif&tr=http%3A%2F%2Fbittorrent-test-tracker.codecrafters.io%2Fannounce"
+            "magnet:?xt=urn:btih:ad42ce8109f54c99613ce38f9b4d87e70f24a165&dn=magnet1.gif&tr=http%3A%2F%2Fbittorrent-test-tracker.codecrafters.io%2Fannounce&tr=udp%3A%2F%2Fbittorrent-test-tracker.codecrafters.io"
         ).expect("is valid");
         assert_eq!(
             magnet_link.info_hash,
@@ -136,10 +141,11 @@ mod test_magnetlink {
         );
         assert_eq!(
             magnet_link.trackers,
-            Some(
+            vec![
                 url::Url::parse("http://bittorrent-test-tracker.codecrafters.io/announce")
-                    .expect("is valid")
-            )
+                    .expect("is valid");
+                2
+            ]
         );
         assert_eq!(magnet_link.file_name, Some("magnet1.gif".to_owned()));
     }
