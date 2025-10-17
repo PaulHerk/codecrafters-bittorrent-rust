@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use futures_util::future::select_all;
+use futures_util::future::select_ok;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -73,9 +73,9 @@ impl<'a> TrackerRequest<'a> {
             url_list.push(url.clone());
             request_list.push(client.get(url).send());
         }
-        let (response, i, _rem) = select_all(request_list).await;
-        let response_bytes = Bytes::copy_from_slice(&response?.bytes().await?);
-        let url = &url_list[i];
+        let (response, _rem) = select_ok(request_list).await?;
+        let url = response.url().clone();
+        let response_bytes = Bytes::copy_from_slice(&response.bytes().await?);
 
         serde_bencode::from_bytes::<TrackerResponse>(&response_bytes).map_err(|des_err| {
             TrackerRequestError::InvalidResponse {
