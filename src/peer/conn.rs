@@ -4,6 +4,7 @@ use std::net::SocketAddrV4;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use futures_core::Stream;
@@ -134,10 +135,10 @@ pub(crate) struct PeerStateInner {
     pub(crate) peer_id: [u8; 20],
     // dk if I need this at all
     // pub state: Arc<Mutex<super::PeerState>>,
-    pub(crate) am_choking: Mutex<bool>,
-    pub(crate) am_interested: Mutex<bool>,
-    pub(crate) peer_choking: Mutex<bool>,
-    pub(crate) peer_interested: Mutex<bool>,
+    pub(crate) am_choking: AtomicBool,
+    pub(crate) am_interested: AtomicBool,
+    pub(crate) peer_choking: AtomicBool,
+    pub(crate) peer_interested: AtomicBool,
     /// the bitfield of the other peer
     pub(crate) has: Mutex<Vec<bool>>,
     /// maps extended message ID to names of extensions
@@ -153,10 +154,10 @@ impl PeerState {
         };
         let peer_identifier_inner = PeerStateInner {
             peer_id: handshake.peer_id,
-            am_choking: Mutex::new(true),
-            am_interested: Mutex::new(false),
-            peer_choking: Mutex::new(true),
-            peer_interested: Mutex::new(false),
+            am_choking: AtomicBool::new(true),
+            am_interested: AtomicBool::new(false),
+            peer_choking: AtomicBool::new(true),
+            peer_interested: AtomicBool::new(false),
             has: Mutex::new(Vec::new()),
             extensions: Mutex::new(extensions),
         };

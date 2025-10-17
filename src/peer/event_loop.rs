@@ -1,5 +1,5 @@
 use futures_util::StreamExt;
-use std::mem;
+use std::{mem, sync::atomic::Ordering};
 
 use crate::{
     extensions::BasicExtensionPayload,
@@ -14,7 +14,7 @@ use crate::{
 impl Peer {
     pub async fn run(mut self) -> Result<(), PeerError> {
         // TODO: do choking
-        *self.state.0.am_choking.lock().unwrap() = false;
+        self.state.0.am_choking.store(false, Ordering::Relaxed);
 
         let mut receiver_stream = mem::take(&mut self.receiver_stream)
             .expect("The receiver stream is initialized after creation of the peer.");
@@ -38,7 +38,7 @@ impl Peer {
                 match message {
                     Msg::Manager(peer_msg) => match peer_msg {
                         ResMessage::FinishedFile => {
-                            if !*self.state.0.peer_interested.lock().unwrap() {
+                            if !self.state.0.peer_interested.load(Ordering::Relaxed) {
                                 break Ok(());
                             }
                         }
@@ -106,17 +106,17 @@ impl Peer {
                     },
                     Msg::Data(message) => match message {
                         PeerMessage::Choke(_no_payload) => {
-                            *self.state.0.peer_choking.lock().unwrap() = true;
+                            self.state.0.peer_choking.store(true, Ordering::Relaxed)
                         }
                         PeerMessage::Unchoke(_no_payload) => {
                             eprintln!("PEER UNCHOKES");
-                            *self.state.0.peer_choking.lock().unwrap() = false
+                            self.state.0.peer_choking.store(false, Ordering::Relaxed);
                         }
                         PeerMessage::Interested(_no_payload) => {
-                            *self.state.0.peer_interested.lock().unwrap() = true
+                            self.state.0.peer_interested.store(true, Ordering::Relaxed);
                         }
                         PeerMessage::NotInterested(_no_payload) => {
-                            *self.state.0.peer_interested.lock().unwrap() = false
+                            self.state.0.peer_interested.store(false, Ordering::Relaxed);
                         }
                         PeerMessage::Have(have_payload) => {
                             self.state.0.has.lock().unwrap()[have_payload.piece_index as usize] =
@@ -153,8 +153,8 @@ impl Peer {
 
                 // request next blocks
                 if self.queue.have_sent == 0
-                    && *self.state.0.am_interested.lock().unwrap()
-                    && !*self.state.0.peer_choking.lock().unwrap()
+                    && self.state.0.am_interested.load(Ordering::Relaxed)
+                    && !self.state.0.peer_choking.load(Ordering::Relaxed)
                 {
                     let queue_iter: Vec<_> = mem::take(&mut self.queue.to_send);
                     self.queue.have_sent = queue_iter.len();

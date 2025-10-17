@@ -1,3 +1,5 @@
+use std::sync::atomic::Ordering;
+
 use futures_util::{self, SinkExt};
 use tokio::sync::mpsc;
 
@@ -63,32 +65,25 @@ impl Peer {
 
     /// this sets our interested flag and sends the message to the peer
     async fn set_interested(&mut self, interested: bool) -> Result<(), PeerError> {
-        {
-            let am_interested = &mut *self.state.0.am_interested.lock().unwrap();
-            if interested != *am_interested {
-                *am_interested = interested;
+        // checks whether state differs from our,
+        // if it does, updates to `interested`
+        let prev = self.state.0.am_interested.compare_exchange(
+            !interested,
+            interested,
+            Ordering::Acquire,
+            Ordering::Relaxed,
+        );
+        // if we have actually updated something, send a msg to the peer
+        if prev.is_ok() {
+            let msg = if interested {
+                PeerMessage::Interested(NoPayload)
             } else {
-                // question: is am_interested dropped if I'd just do if (equal) return Ok(())?
-                return Ok(());
-            }
-        }
-
-        let msg = if interested {
-            PeerMessage::Interested(NoPayload)
+                PeerMessage::NotInterested(NoPayload)
+            };
+            self.send_peer(msg).await
         } else {
-            PeerMessage::NotInterested(NoPayload)
-        };
-        self.send_peer(msg).await
-    }
-
-    async fn sever_conn(&mut self) -> bool {
-        if *self.state.0.peer_interested.lock().unwrap()
-            || *self.state.0.am_interested.lock().unwrap()
-        {
-            return false;
+            Ok(())
         }
-
-        self.peer_writer.close().await.is_ok()
     }
 }
 
