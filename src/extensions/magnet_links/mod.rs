@@ -50,13 +50,8 @@ impl MagnetLink {
         Self::from_query_pairs(url.query_pairs())
     }
 
-    pub fn get_announce_url(&self) -> Result<url::Url, MagnetLinkError> {
-        let url = self
-            .trackers
-            .first()
-            .ok_or(MagnetLinkError::NoTrackerUrl)?
-            .clone();
-        Ok(url)
+    pub fn get_announce_urls(&self) -> Result<Vec<url::Url>, MagnetLinkError> {
+        Ok(self.trackers.clone())
     }
 
     fn from_query_pairs(pairs: Parse) -> Result<Self, MagnetLinkError> {
@@ -96,6 +91,9 @@ impl MagnetLink {
             }
         }
 
+        if trackers.is_empty() {
+            return Err(MagnetLinkError::NoTrackerUrl);
+        }
         let info_hash = info_hash.ok_or(MagnetLinkError::InvalidInfoHash(anyhow::anyhow!(
             "No info hash provided."
         )))?;

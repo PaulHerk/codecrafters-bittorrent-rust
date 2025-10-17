@@ -1,3 +1,5 @@
+use bytes::Bytes;
+use futures_util::future::select_all;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -56,23 +58,30 @@ impl<'a> TrackerRequest<'a> {
 
     pub async fn get_response(
         &self,
-        mut announce_url: url::Url,
+        announce_urls: impl IntoIterator<Item = url::Url>,
     ) -> Result<TrackerResponse, TrackerRequestError> {
-        announce_url.set_query(Some(&self.to_url_encoded()));
+        let mut request_list = Vec::new();
+        let mut url_list = Vec::new();
 
         let client = reqwest::Client::builder()
         .user_agent(
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:142.0) Gecko/20100101 Firefox/142.0",
         )
         .build()?;
-        let response = client.get(announce_url.clone()).send().await?;
-        let response_bytes = response.bytes().await?;
+        for mut url in announce_urls {
+            url.set_query(Some(&self.to_url_encoded()));
+            url_list.push(url.clone());
+            request_list.push(client.get(url).send());
+        }
+        let (response, i, _rem) = select_all(request_list).await;
+        let response_bytes = Bytes::copy_from_slice(&response?.bytes().await?);
+        let url = &url_list[i];
 
         serde_bencode::from_bytes::<TrackerResponse>(&response_bytes).map_err(|des_err| {
             TrackerRequestError::InvalidResponse {
                 error: des_err,
                 response: response_bytes,
-                url: announce_url.as_str().to_string(),
+                url: url.to_string(),
             }
         })
     }

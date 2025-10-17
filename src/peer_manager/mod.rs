@@ -29,7 +29,7 @@ pub(crate) const MAX_PIECES_IN_PARALLEL: usize = 5;
 pub struct PeerManager {
     torrent_state: TorrentState,
     rx: mpsc::Receiver<ReqMsgFromPeer>,
-    announce_url: url::Url,
+    announce_urls: Vec<url::Url>,
     peers: HashMap<[u8; 20], PeerConn>,
 }
 
@@ -170,7 +170,7 @@ impl PeerManager {
                 )
                 .await?,
                 rx,
-                announce_url: file_entry.announce,
+                announce_urls: vec![file_entry.announce],
                 peers: HashMap::new(),
             })
         } else {
@@ -181,7 +181,7 @@ impl PeerManager {
             Ok(Self {
                 torrent_state,
                 rx,
-                announce_url: magnet_link.get_announce_url()?,
+                announce_urls: magnet_link.get_announce_urls()?,
                 peers: HashMap::new(),
             })
         }
@@ -201,7 +201,7 @@ impl PeerManager {
         Ok(Self {
             torrent_state,
             rx,
-            announce_url: torrent.announce,
+            announce_urls: vec![torrent.announce],
             peers: HashMap::new(),
         })
     }
@@ -317,7 +317,11 @@ impl PeerManager {
                                 if metadata_piece_manager.check_finished() {
                                     let metainfo = metadata_piece_manager.get_metadata().expect("This shouldn't fail since we checked that the hashes match.");
                                     let torrent = Torrent {
-                                        announce: self.announce_url.clone(),
+                                        announce: self
+                                            .announce_urls
+                                            .first()
+                                            .expect("If there's none, the parsing would have failed long ago.")
+                                            .clone(),
                                         info: metainfo,
                                     };
                                     let piece_manager = PieceManager::new(

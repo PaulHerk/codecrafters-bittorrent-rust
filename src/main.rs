@@ -81,7 +81,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let info_hash = torrent.info.info_hash();
             let tracker_req =
                 TrackerRequest::new(&info_hash, PEER_ID, PEER_PORT, torrent.info.get_length());
-            let response = tracker_req.get_response(torrent.announce).await?;
+            let response = tracker_req.get_response(vec![torrent.announce]).await?;
             for peer in response.peers.0 {
                 println!("{peer:?}");
             }
@@ -150,7 +150,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let info_hash = torrent.info.info_hash();
             let tracker =
                 TrackerRequest::new(&info_hash, PEER_ID, PEER_PORT, torrent.info.get_length());
-            let response = tracker.get_response(torrent.announce).await?;
+            let response = tracker.get_response(vec![torrent.announce]).await?;
 
             tokio::spawn(async move {
                 let _ = peer_manager.run().await;
@@ -195,7 +195,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // using 999 as a placeholder since we don't know the length yet
             let tracker = TrackerRequest::new(&magnet_link.info_hash, PEER_ID, PEER_PORT, 999);
             let response = tracker
-                .get_response(magnet_link.get_announce_url()?)
+                .get_response(magnet_link.get_announce_urls()?)
                 .await?;
 
             tokio::spawn(async move {
