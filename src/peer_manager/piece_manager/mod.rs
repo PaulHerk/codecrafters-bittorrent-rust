@@ -7,7 +7,9 @@ use crate::{
     Torrent,
     database::DBConnection,
     peer_manager::{
-        PieceState, error::PeerManagerError, piece_manager::req_preparer::DownloadQueue,
+        PieceState,
+        error::PeerManagerError,
+        piece_manager::{piece_selector::PieceSelector, req_preparer::DownloadQueue},
     },
 };
 mod file_manager;
@@ -16,11 +18,9 @@ mod req_preparer;
 
 #[derive(Debug)]
 pub(super) struct PieceManager {
-    /// I need this information too often to always query the DB
-    /// so let's cache it
-    pub(super) have: Vec<bool>,
+    pub(super) piece_selector: PieceSelector,
     /// if it's None, we are finished
-    download_queue: DownloadQueue,
+    pub(super) download_queue: DownloadQueue,
     db_conn: DBConnection,
     /// the output file
     file: File,
@@ -35,6 +35,7 @@ impl PieceManager {
         let file_path = file_path.unwrap_or(torrent.info.name.clone().into());
         let file_entry = db_conn.get_entry().await?;
         let file_existed = file_entry.is_some();
+
         let file_entry = if let Some(file_entry) = file_entry {
             file_entry
         } else {
@@ -58,10 +59,14 @@ impl PieceManager {
         };
 
         Ok(PieceManager {
-            have: file_entry.bitfield.to_vec(),
+            piece_selector: PieceSelector::new(file_entry.bitfield.to_vec()),
             download_queue,
             db_conn,
             file,
         })
+    }
+
+    pub(super) fn get_have(&self) -> &Vec<bool> {
+        &self.piece_selector.have
     }
 }

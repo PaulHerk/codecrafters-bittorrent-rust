@@ -120,11 +120,12 @@ impl Peer {
                             self.state.0.peer_interested.store(false, Ordering::Relaxed);
                         }
                         PeerMessage::Have(have_payload) => {
-                            self.state.0.has.lock().unwrap()[have_payload.piece_index as usize] =
-                                true;
+                            self.send_peer_manager(ReqMessage::PeerHas(have_payload))
+                                .await?;
                         }
                         PeerMessage::Bitfield(bitfield_payload) => {
-                            *self.state.0.has.lock().unwrap() = bitfield_payload.pieces_available;
+                            self.send_peer_manager(ReqMessage::PeerBitfield(bitfield_payload))
+                                .await?;
                         }
                         PeerMessage::Request(request_piece_payload) => {
                             self.send_peer_manager(ReqMessage::NeedBlock(request_piece_payload))

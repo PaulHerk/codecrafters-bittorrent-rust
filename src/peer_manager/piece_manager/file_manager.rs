@@ -45,11 +45,11 @@ impl PieceManager {
 
         // we first calculate the new bitfield, then update it in the DB and lastly update the struct
         // this is so if the DB fails, the struct is still in the old state
-        let mut new_bitfield = self.have.clone();
+        let mut new_bitfield = self.get_have().clone();
         let piece_i = piece_state.piece_i as usize;
         new_bitfield[piece_i] = true;
         self.db_conn.update_bitfields(new_bitfield).await?;
-        self.have[piece_i] = true;
+        self.piece_selector.have[piece_i] = true;
 
         Ok(())
     }
@@ -73,6 +73,9 @@ impl PieceManager {
         req_payload: RequestPiecePayload,
         metainfo: &Metainfo,
     ) -> Option<ResponsePiecePayload> {
+        if !self.get_have()[req_payload.index as usize] {
+            return None;
+        }
         let mut buf = BytesMut::zeroed(req_payload.length as usize);
         let offset =
             req_payload.index as u64 * metainfo.piece_length as u64 + req_payload.begin as u64;
@@ -89,7 +92,7 @@ impl PieceManager {
     }
 
     pub(in crate::peer_manager) fn is_finished(&self) -> bool {
-        self.have.iter().all(|b| *b)
+        self.get_have().iter().all(|b| *b)
     }
 }
 

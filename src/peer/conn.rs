@@ -138,9 +138,8 @@ pub(crate) struct PeerStateInner {
     pub(crate) am_interested: AtomicBool,
     pub(crate) peer_choking: AtomicBool,
     pub(crate) peer_interested: AtomicBool,
-    /// the bitfield of the other peer
-    pub(crate) has: Mutex<Vec<bool>>,
     /// maps extended message ID to names of extensions
+    /// TODO: we definetly don't need this here
     pub(crate) extensions: Mutex<Option<HashMap<u8, Box<dyn ExtensionHandler>>>>,
 }
 
@@ -157,7 +156,6 @@ impl PeerState {
             am_interested: AtomicBool::new(false),
             peer_choking: AtomicBool::new(true),
             peer_interested: AtomicBool::new(false),
-            has: Mutex::new(Vec::new()),
             extensions: Mutex::new(extensions),
         };
         Self(Arc::new(peer_identifier_inner))
