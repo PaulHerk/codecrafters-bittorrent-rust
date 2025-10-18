@@ -11,6 +11,7 @@ use crate::{
     },
 };
 mod file_manager;
+mod piece_selector;
 mod req_preparer;
 
 #[derive(Debug)]

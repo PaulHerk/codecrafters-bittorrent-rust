@@ -21,6 +21,8 @@ use crate::{
 pub mod error;
 mod piece_manager;
 
+type PeerId = [u8; 20];
+
 pub const BLOCK_QUEUE_SIZE_MAX: usize = 20;
 /// how many pieces are in the queue at max
 pub(crate) const MAX_PIECES_IN_PARALLEL: usize = 5;
@@ -30,7 +32,7 @@ pub struct PeerManager {
     torrent_state: TorrentState,
     rx: mpsc::Receiver<ReqMsgFromPeer>,
     announce_urls: Vec<url::Url>,
-    peers: HashMap<[u8; 20], PeerConn>,
+    peers: HashMap<PeerId, PeerConn>,
 }
 
 #[derive(Debug)]
