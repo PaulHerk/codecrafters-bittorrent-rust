@@ -111,6 +111,7 @@ impl Peer {
                         PeerMessage::Unchoke(_no_payload) => {
                             eprintln!("PEER UNCHOKES");
                             self.state.0.peer_choking.store(false, Ordering::Relaxed);
+                            self.send_peer(PeerMessage::Unchoke(NoPayload)).await?;
                         }
                         PeerMessage::Interested(_no_payload) => {
                             self.state.0.peer_interested.store(true, Ordering::Relaxed);
